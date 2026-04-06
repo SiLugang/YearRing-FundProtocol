@@ -689,7 +689,7 @@ async function doDeposit() {
   // Re-acquire fresh signer from existing userProvider to avoid stale nonce (ethers v6)
   let freshSigner;
   try {
-    freshSigner = await userProvider.getSigner();
+    freshSigner = await userProvider.getSigner(userAddr);
   } catch (e) {
     stat.className = "action-status err";
     stat.textContent = "✗ Could not get signer: " + e.message;
@@ -779,7 +779,7 @@ async function doRedeem() {
   // Re-acquire fresh signer from existing userProvider to avoid stale nonce (ethers v6)
   let freshSigner;
   try {
-    freshSigner = await userProvider.getSigner();
+    freshSigner = await userProvider.getSigner(userAddr);
   } catch (e) {
     stat.className = "action-status err";
     stat.textContent = "✗ Could not get signer: " + e.message;
@@ -893,7 +893,7 @@ async function doInvest() {
 
   btn.disabled = true;
   let signer;
-  try { signer = await userProvider.getSigner(); }
+  try { signer = await userProvider.getSigner(userAddr); }
   catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
 
   const vaultW   = new ethers.Contract(CFG.ADDRESSES.FundVaultV01,       CFG.ABI.FundVaultV01,       signer);
@@ -939,7 +939,7 @@ async function doDivest() {
 
   btn.disabled = true;
   let signer;
-  try { signer = await userProvider.getSigner(); }
+  try { signer = await userProvider.getSigner(userAddr); }
   catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
 
   const managerW  = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, signer);
@@ -985,7 +985,7 @@ async function doRebalance() {
 
   btn.disabled = true;
   let signer;
-  try { signer = await userProvider.getSigner(); }
+  try { signer = await userProvider.getSigner(userAddr); }
   catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
 
   const managerW  = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, signer);
