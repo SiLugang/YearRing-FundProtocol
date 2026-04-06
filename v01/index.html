@@ -750,12 +750,14 @@ async function onRedeemInput() {
   if (_redPaused)          { warn.textContent = "⚠️ Redeems are currently paused."; return; }
   if (_systemMode === 2n)  { warn.textContent = "⚠️ EmergencyExit mode active — use claimExitAssets() instead."; return; }
 
-  const sharesFloat = f18f(_shares);
-  if (raw > sharesFloat)   { warn.textContent = `⚠️ Exceeds your balance (${sharesFloat.toFixed(4)} fbUSDC).`; return; }
+  // Compare using bigint to avoid float rounding false positives
+  let sharesInputRaw;
+  try { sharesInputRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesInputRaw = _shares + 1n; }
+  if (sharesInputRaw > _shares) { warn.textContent = `⚠️ Exceeds your balance (${fmt18(_shares)} fbUSDC).`; return; }
 
   try {
     const vault  = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, staticProvider);
-    const shares = ethers.parseUnits(raw.toFixed(18), 18);
+    const shares = sharesInputRaw > _shares ? _shares : sharesInputRaw;
     const assets = await vault.previewRedeem(shares);
     prev.textContent = "≈ " + fmt6(assets) + " USDC";
     btn.disabled = false;
@@ -764,7 +766,7 @@ async function onRedeemInput() {
 
 async function setRedeemMax() {
   const sharesFloat = f18f(_shares);
-  document.getElementById("redeem-shares").value = sharesFloat.toFixed(4);
+  document.getElementById("redeem-shares").value = sharesFloat.toFixed(6);
   await onRedeemInput();
 }
 
@@ -787,7 +789,10 @@ async function doRedeem() {
     return;
   }
 
-  const shares = ethers.parseUnits(raw.toFixed(18), 18);
+  // Clamp to _shares to absorb float-to-bigint rounding drift
+  let sharesRaw;
+  try { sharesRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesRaw = _shares; }
+  const shares = sharesRaw > _shares ? _shares : sharesRaw;
   const vaultW = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, freshSigner);
 
   try {
