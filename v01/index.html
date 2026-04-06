@@ -417,6 +417,7 @@ let _ppsRaw       = 0n;
 
 // User state (updated in loadUserPosition)
 let _shares      = 0n;
+let _redeemIsMax = false;   // true when Max btn set the redeem input
 let _usdcBal     = 0n;
 let _valueUsdc   = 0.0;
 let _allowed     = false;
@@ -735,7 +736,8 @@ async function doDeposit() {
 }
 
 // ── Redeem ────────────────────────────────────────────────────────────────────
-async function onRedeemInput() {
+async function onRedeemInput(fromMax = false) {
+  if (!fromMax) _redeemIsMax = false;   // manual edit clears Max flag
   const raw  = parseFloat(document.getElementById("redeem-shares").value || "0");
   const btn  = document.getElementById("redeem-btn");
   const warn = document.getElementById("redeem-warn");
@@ -750,14 +752,18 @@ async function onRedeemInput() {
   if (_redPaused)          { warn.textContent = "⚠️ Redeems are currently paused."; return; }
   if (_systemMode === 2n)  { warn.textContent = "⚠️ EmergencyExit mode active — use claimExitAssets() instead."; return; }
 
-  // Compare using bigint to avoid float rounding false positives
+  // If Max was clicked, skip float comparison — use _shares directly
   let sharesInputRaw;
-  try { sharesInputRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesInputRaw = _shares + 1n; }
-  if (sharesInputRaw > _shares) { warn.textContent = `⚠️ Exceeds your balance (${fmt18(_shares)} fbUSDC).`; return; }
+  if (_redeemIsMax) {
+    sharesInputRaw = _shares;
+  } else {
+    try { sharesInputRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesInputRaw = _shares + 1n; }
+    if (sharesInputRaw > _shares) { warn.textContent = `⚠️ Exceeds your balance (${fmt18(_shares)} fbUSDC).`; return; }
+  }
 
   try {
     const vault  = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, staticProvider);
-    const shares = sharesInputRaw > _shares ? _shares : sharesInputRaw;
+    const shares = sharesInputRaw;
     const assets = await vault.previewRedeem(shares);
     prev.textContent = "≈ " + fmt6(assets) + " USDC";
     btn.disabled = false;
@@ -765,9 +771,9 @@ async function onRedeemInput() {
 }
 
 async function setRedeemMax() {
-  const sharesFloat = f18f(_shares);
-  document.getElementById("redeem-shares").value = sharesFloat.toFixed(6);
-  await onRedeemInput();
+  _redeemIsMax = true;
+  document.getElementById("redeem-shares").value = f18f(_shares).toFixed(6);
+  await onRedeemInput(true);
 }
 
 async function doRedeem() {
@@ -789,10 +795,16 @@ async function doRedeem() {
     return;
   }
 
-  // Clamp to _shares to absorb float-to-bigint rounding drift
-  let sharesRaw;
-  try { sharesRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesRaw = _shares; }
-  const shares = sharesRaw > _shares ? _shares : sharesRaw;
+  // Max: use exact _shares bigint; otherwise clamp to absorb float rounding drift
+  let shares;
+  if (_redeemIsMax) {
+    shares = _shares;
+    _redeemIsMax = false;
+  } else {
+    let sharesRaw;
+    try { sharesRaw = ethers.parseUnits(raw.toFixed(6), 18); } catch { sharesRaw = _shares; }
+    shares = sharesRaw > _shares ? _shares : sharesRaw;
+  }
   const vaultW = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, freshSigner);
 
   try {
