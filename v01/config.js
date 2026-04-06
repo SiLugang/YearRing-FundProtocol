@@ -15,6 +15,7 @@ window.MAINNET_CONFIG = {
     FundVaultV01:       "0x8acaec738F9559F8b025c4372d827D3CD3928322",
     StrategyManagerV01: "0xa44d3b9b0ECD6fFa4bD646957468c0B5Bfa64A54",
     AaveV3StrategyV01:  "0x621CC4189946128eF2d584F69bb994C84FcA612D",
+    ADMIN:              "0x087ea7F67d9282f0bdC43627b855F79789C6824C",
   },
 
   ABI: {
@@ -31,14 +32,21 @@ window.MAINNET_CONFIG = {
       "function depositsPaused() view returns (bool)",
       "function redeemsPaused() view returns (bool)",
       "function isAllowed(address) view returns (bool)",
+      "function availableToInvest() view returns (uint256)",
       // write
       "function deposit(uint256 assets, address receiver) returns (uint256 shares)",
       "function redeem(uint256 shares, address receiver, address owner) returns (uint256 assets)",
+      "function transferToStrategyManager(uint256 amount)",
     ],
     StrategyManagerV01: [
       "function totalManagedAssets() view returns (uint256)",
+      "function idleUnderlying() view returns (uint256)",
       "function investCap() view returns (uint256)",
       "function paused() view returns (bool)",
+      // write (admin only)
+      "function invest(uint256 amount)",
+      "function divest(uint256 amount) returns (uint256)",
+      "function returnToVault(uint256 amount)",
     ],
     AaveV3StrategyV01: [
       "function totalUnderlying() view returns (uint256)",

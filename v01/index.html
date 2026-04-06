@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>YearRing-FundProtocol — Base Mainnet</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
-  <script src="./config.js"></script>
+  <script src="./config.js?v=2"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body {
@@ -130,6 +130,20 @@
 
     .error-msg { color: #f85149; font-size: 0.85rem; margin-top: 8px; }
     .loading { color: #8b949e; font-size: 0.85rem; }
+
+    /* Admin panel */
+    .admin-panel {
+      background: #161b22; border: 1px solid #f0883e;
+      border-radius: 8px; padding: 20px; margin-bottom: 16px;
+    }
+    .admin-panel h2 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; color: #f0883e; }
+    .admin-panel .admin-sub { color: #8b949e; font-size: 0.78rem; margin-bottom: 16px; }
+    .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    @media (max-width: 500px) { .admin-grid { grid-template-columns: 1fr; } }
+    .admin-op { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
+    .admin-op .op-title { font-size: 0.82rem; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .admin-op .op-info { color: #8b949e; font-size: 0.8rem; margin-bottom: 10px; min-height: 16px; font-variant-numeric: tabular-nums; }
+    .admin-op .op-info span { color: #e6edf3; font-weight: 600; }
 
     /* Version footer */
     .version-footer {
@@ -310,6 +324,52 @@
   <div class="error-msg" id="wallet-error"></div>
 </div>
 
+<!-- Admin Panel (visible only when ADMIN wallet connected) -->
+<div class="admin-panel" id="admin-panel" style="display:none">
+  <h2>Admin Operations</h2>
+  <div class="admin-sub">Visible only to ADMIN wallet · All operations require on-chain confirmation</div>
+  <div class="admin-grid">
+
+    <!-- Invest -->
+    <div class="admin-op">
+      <div class="op-title">Invest into Aave</div>
+      <div class="op-info" id="admin-invest-info">Available to invest: <span id="admin-avail">—</span> USDC</div>
+      <div class="input-row">
+        <input type="number" id="invest-amount" placeholder="0.00" min="0" step="1" />
+        <button class="max-btn" onclick="setInvestMax()">Max</button>
+      </div>
+      <div class="action-warn" id="invest-warn"></div>
+      <button id="invest-btn" class="btn-full" onclick="doInvest()" disabled>Invest</button>
+      <div class="action-status" id="invest-status"></div>
+    </div>
+
+    <!-- Divest -->
+    <div class="admin-op">
+      <div class="op-title">Divest from Aave</div>
+      <div class="op-info" id="admin-divest-info">Deployed in Aave: <span id="admin-deployed">—</span> USDC</div>
+      <div class="input-row">
+        <input type="number" id="divest-amount" placeholder="0.00" min="0" step="1" />
+        <button class="max-btn" onclick="setDivestMax()">Max</button>
+      </div>
+      <div class="action-warn" id="divest-warn"></div>
+      <button id="divest-btn" class="btn-full" onclick="doDivest()" disabled>Divest &amp; Return to Vault</button>
+      <div class="action-status" id="divest-status"></div>
+    </div>
+
+    <!-- Rebalance -->
+    <div class="admin-op">
+      <div class="op-title">Rebalance Reserve</div>
+      <div class="op-info" id="admin-reserve-info">
+        Reserve: <span id="admin-reserve-pct">—</span>% &nbsp;·&nbsp; Pull needed: <span id="admin-rebal-amount">—</span> USDC
+      </div>
+      <div class="action-warn" id="rebal-warn"></div>
+      <button id="rebal-btn" class="btn-full" onclick="doRebalance()" disabled>Rebalance to 30%</button>
+      <div class="action-status" id="rebal-status"></div>
+    </div>
+
+  </div>
+</div>
+
 <!-- Contract Addresses -->
 <div class="section">
   <h2>Contract Addresses <span style="color:#8b949e;font-weight:400;font-size:0.8rem">(Base Mainnet · Chain ID 8453)</span></h2>
@@ -487,6 +547,14 @@ async function connectWallet() {
     const vault = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, staticProvider);
     await loadUserPosition(vault);
 
+    // Show admin panel if ADMIN wallet
+    const adminAddr = (CFG.ADDRESSES.ADMIN || "").toLowerCase();
+    console.log("[admin check] userAddr:", userAddr.toLowerCase(), "| adminAddr:", adminAddr, "| match:", userAddr.toLowerCase() === adminAddr);
+    if (adminAddr && userAddr.toLowerCase() === adminAddr) {
+      document.getElementById("admin-panel").style.display = "block";
+      loadAdminState().catch(e => console.error("loadAdminState:", e));
+    }
+
     // Listen for account / network changes
     window.ethereum.on("accountsChanged", () => location.reload());
     window.ethereum.on("chainChanged",    () => location.reload());
@@ -614,12 +682,24 @@ async function doDeposit() {
   const raw  = parseFloat(document.getElementById("deposit-amount").value || "0");
   const stat = document.getElementById("deposit-status");
   const btn  = document.getElementById("deposit-btn");
-  if (raw <= 0 || !userSigner) return;
+  if (raw <= 0 || !userAddr) return;
+
+  btn.disabled = true;
+
+  // Re-acquire fresh signer from existing userProvider to avoid stale nonce (ethers v6)
+  let freshSigner;
+  try {
+    freshSigner = await userProvider.getSigner();
+  } catch (e) {
+    stat.className = "action-status err";
+    stat.textContent = "✗ Could not get signer: " + e.message;
+    btn.disabled = false;
+    return;
+  }
 
   const assets   = ethers.parseUnits(raw.toFixed(6), 6);
-  const usdcW    = new ethers.Contract(CFG.ADDRESSES.USDC,        CFG.ABI.USDC,        userSigner);
-  const vaultW   = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, userSigner);
-  btn.disabled   = true;
+  const usdcW    = new ethers.Contract(CFG.ADDRESSES.USDC,         CFG.ABI.USDC,         freshSigner);
+  const vaultW   = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, freshSigner);
 
   try {
     // Step 1: Check allowance
@@ -644,6 +724,8 @@ async function doDeposit() {
     document.getElementById("deposit-amount").value = "";
     document.getElementById("deposit-preview").textContent = "≈ — fbUSDC";
     await loadStats();
+    const vaultRO = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, staticProvider);
+    await loadUserPosition(vaultRO);
 
   } catch (err) {
     stat.className   = "action-status err";
@@ -690,11 +772,23 @@ async function doRedeem() {
   const raw  = parseFloat(document.getElementById("redeem-shares").value || "0");
   const stat = document.getElementById("redeem-status");
   const btn  = document.getElementById("redeem-btn");
-  if (raw <= 0 || !userSigner) return;
+  if (raw <= 0 || !userAddr) return;
+
+  btn.disabled = true;
+
+  // Re-acquire fresh signer from existing userProvider to avoid stale nonce (ethers v6)
+  let freshSigner;
+  try {
+    freshSigner = await userProvider.getSigner();
+  } catch (e) {
+    stat.className = "action-status err";
+    stat.textContent = "✗ Could not get signer: " + e.message;
+    btn.disabled = false;
+    return;
+  }
 
   const shares = ethers.parseUnits(raw.toFixed(18), 18);
-  const vaultW = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, userSigner);
-  btn.disabled = true;
+  const vaultW = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, freshSigner);
 
   try {
     stat.className   = "action-status";
@@ -708,10 +802,215 @@ async function doRedeem() {
     document.getElementById("redeem-shares").value = "";
     document.getElementById("redeem-preview").textContent = "≈ — USDC";
     await loadStats();
+    const vaultRO = new ethers.Contract(CFG.ADDRESSES.FundVaultV01, CFG.ABI.FundVaultV01, staticProvider);
+    await loadUserPosition(vaultRO);
 
   } catch (err) {
     stat.className   = "action-status err";
     stat.textContent = "✗ " + (err.reason || err.shortMessage || err.message || "Transaction failed");
+    btn.disabled = false;
+  }
+}
+
+// ── Admin state ───────────────────────────────────────────────────────────────
+let _adminSafeMax    = 0n;   // safe invest max (raw, 6 dec)
+let _adminDeployed   = 0n;   // Aave deployed (raw, 6 dec)
+let _adminRebalAmt   = 0n;   // amount needed to restore reserve to 30% (raw, 6 dec)
+
+async function loadAdminState() {
+  try {
+    const vault     = new ethers.Contract(CFG.ADDRESSES.FundVaultV01,       CFG.ABI.FundVaultV01,       staticProvider);
+    const manager   = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, staticProvider);
+    const strategy  = new ethers.Contract(CFG.ADDRESSES.AaveV3StrategyV01,  CFG.ABI.AaveV3StrategyV01,  staticProvider);
+
+    const [available, totalAssets, managed, deployed] = await Promise.all([
+      vault.availableToInvest(),
+      vault.totalAssets(),
+      manager.totalManagedAssets(),
+      strategy.totalUnderlying(),
+    ]);
+
+    // Safe invest max: min(availableToInvest, floor(totalAssets × 70%) − managed)
+    // Prevents MaxDeployExceeded revert caused by dust rounding overflow
+    const maxByHardCap = totalAssets * 7000n / 10000n - managed;
+    _adminSafeMax  = available < maxByHardCap ? available : (maxByHardCap > 0n ? maxByHardCap : 0n);
+    _adminDeployed = deployed;
+
+    // Reserve ratio: vaultIdle / totalAssets
+    // vaultIdle ≈ totalAssets − managed (managed includes idle in manager + strategy)
+    const vaultIdle  = totalAssets > managed ? totalAssets - managed : 0n;
+    const reserveBps = totalAssets > 0n ? vaultIdle * 10000n / totalAssets : 0n;
+    const targetIdle = totalAssets * 3000n / 10000n;  // 30%
+
+    // Amount to pull: max(targetIdle − vaultIdle, 0), capped by deployed
+    const rawPull    = targetIdle > vaultIdle ? targetIdle - vaultIdle : 0n;
+    _adminRebalAmt   = rawPull < deployed ? rawPull : deployed;
+
+    document.getElementById("admin-avail").textContent    = fmt6(_adminSafeMax);
+    document.getElementById("admin-deployed").textContent = fmt6(_adminDeployed);
+
+    // Reserve display with colour hint
+    const pct = Number(reserveBps) / 100;
+    const pctEl = document.getElementById("admin-reserve-pct");
+    pctEl.textContent = pct.toFixed(1);
+    pctEl.style.color = pct < 25 ? "#f85149" : pct < 30 ? "#e3b341" : "#3fb950";
+    document.getElementById("admin-rebal-amount").textContent =
+      _adminRebalAmt > 0n ? fmt6(_adminRebalAmt) : "0 (reserve OK)";
+
+    document.getElementById("invest-btn").disabled = _adminSafeMax === 0n;
+    document.getElementById("divest-btn").disabled = _adminDeployed === 0n;
+    document.getElementById("rebal-btn").disabled  = _adminRebalAmt === 0n;
+  } catch (e) {
+    console.error("loadAdminState:", e);
+  }
+}
+
+async function setInvestMax() {
+  document.getElementById("invest-amount").value = fmt6(_adminSafeMax);
+  document.getElementById("invest-warn").textContent = "";
+  document.getElementById("invest-btn").disabled = _adminSafeMax === 0n;
+}
+
+async function setDivestMax() {
+  document.getElementById("divest-amount").value = fmt6(_adminDeployed);
+  document.getElementById("divest-warn").textContent = "";
+  document.getElementById("divest-btn").disabled = _adminDeployed === 0n;
+}
+
+async function doInvest() {
+  const raw  = parseFloat(document.getElementById("invest-amount").value || "0");
+  const stat = document.getElementById("invest-status");
+  const warn = document.getElementById("invest-warn");
+  const btn  = document.getElementById("invest-btn");
+  warn.textContent = "";
+  if (raw <= 0 || !userAddr) return;
+
+  const amountRaw = ethers.parseUnits(raw.toFixed(6), 6);
+  if (amountRaw > _adminSafeMax) {
+    warn.textContent = `⚠️ Exceeds safe max (${fmt6(_adminSafeMax)} USDC). Use Max to fill safe limit.`;
+    return;
+  }
+
+  btn.disabled = true;
+  let signer;
+  try { signer = await userProvider.getSigner(); }
+  catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
+
+  const vaultW   = new ethers.Contract(CFG.ADDRESSES.FundVaultV01,       CFG.ABI.FundVaultV01,       signer);
+  const managerW = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, signer);
+
+  try {
+    stat.className   = "action-status";
+    stat.textContent = "Step 1/2: transferToStrategyManager — confirm in MetaMask…";
+    const tx1 = await vaultW.transferToStrategyManager(amountRaw, { gasLimit: 350000 });
+    stat.textContent = "Step 1/2: Waiting for confirmation…";
+    await tx1.wait();
+
+    stat.textContent = "Step 2/2: manager.invest — confirm in MetaMask…";
+    const tx2 = await managerW.invest(amountRaw, { gasLimit: 500000 });
+    stat.textContent = "Step 2/2: Waiting for confirmation…";
+    await tx2.wait();
+
+    stat.className   = "action-status ok";
+    stat.textContent = `✓ Invested ${raw.toFixed(6)} USDC into Aave`;
+    document.getElementById("invest-amount").value = "";
+    await loadStats();
+    await loadAdminState();
+  } catch (err) {
+    stat.className   = "action-status err";
+    stat.textContent = "✗ " + (err.reason || err.shortMessage || err.message || "Failed");
+    btn.disabled = false;
+  }
+}
+
+async function doDivest() {
+  const raw  = parseFloat(document.getElementById("divest-amount").value || "0");
+  const stat = document.getElementById("divest-status");
+  const warn = document.getElementById("divest-warn");
+  const btn  = document.getElementById("divest-btn");
+  warn.textContent = "";
+  if (raw <= 0 || !userAddr) return;
+
+  const amountRaw = ethers.parseUnits(raw.toFixed(6), 6);
+  if (amountRaw > _adminDeployed) {
+    warn.textContent = `⚠️ Exceeds deployed amount (${fmt6(_adminDeployed)} USDC).`;
+    return;
+  }
+
+  btn.disabled = true;
+  let signer;
+  try { signer = await userProvider.getSigner(); }
+  catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
+
+  const managerW  = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, signer);
+  const managerRO = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, staticProvider);
+
+  try {
+    stat.className   = "action-status";
+    stat.textContent = "Step 1/2: divest from Aave — confirm in MetaMask…";
+    const tx1 = await managerW.divest(amountRaw, { gasLimit: 500000 });
+    stat.textContent = "Step 1/2: Waiting for confirmation…";
+    await tx1.wait();
+
+    // Read actual idle after divest (may differ from requested due to Aave rounding)
+    const idle = await managerRO.idleUnderlying();
+
+    stat.textContent = "Step 2/2: returnToVault — confirm in MetaMask…";
+    const tx2 = await managerW.returnToVault(idle, { gasLimit: 200000 });
+    stat.textContent = "Step 2/2: Waiting for confirmation…";
+    await tx2.wait();
+
+    stat.className   = "action-status ok";
+    stat.textContent = `✓ Divested and returned ${fmt6(idle)} USDC to vault`;
+    document.getElementById("divest-amount").value = "";
+    await loadStats();
+    await loadAdminState();
+  } catch (err) {
+    stat.className   = "action-status err";
+    stat.textContent = "✗ " + (err.reason || err.shortMessage || err.message || "Failed");
+    btn.disabled = false;
+  }
+}
+
+async function doRebalance() {
+  const stat = document.getElementById("rebal-status");
+  const warn = document.getElementById("rebal-warn");
+  const btn  = document.getElementById("rebal-btn");
+  warn.textContent = "";
+
+  if (_adminRebalAmt === 0n || !userAddr) {
+    warn.textContent = "⚠️ Reserve is already at or above 30%. Nothing to do.";
+    return;
+  }
+
+  btn.disabled = true;
+  let signer;
+  try { signer = await userProvider.getSigner(); }
+  catch (e) { stat.className = "action-status err"; stat.textContent = "✗ " + e.message; btn.disabled = false; return; }
+
+  const managerW  = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, signer);
+  const managerRO = new ethers.Contract(CFG.ADDRESSES.StrategyManagerV01, CFG.ABI.StrategyManagerV01, staticProvider);
+
+  try {
+    stat.className   = "action-status";
+    stat.textContent = `Step 1/2: divest ${fmt6(_adminRebalAmt)} USDC from Aave — confirm in MetaMask…`;
+    const tx1 = await managerW.divest(_adminRebalAmt, { gasLimit: 500000 });
+    stat.textContent = "Step 1/2: Waiting for confirmation…";
+    await tx1.wait();
+
+    const idle = await managerRO.idleUnderlying();
+    stat.textContent = "Step 2/2: returnToVault — confirm in MetaMask…";
+    const tx2 = await managerW.returnToVault(idle, { gasLimit: 200000 });
+    stat.textContent = "Step 2/2: Waiting for confirmation…";
+    await tx2.wait();
+
+    stat.className   = "action-status ok";
+    stat.textContent = `✓ Returned ${fmt6(idle)} USDC to vault. Reserve restored to ~30%.`;
+    await loadStats();
+    await loadAdminState();
+  } catch (err) {
+    stat.className   = "action-status err";
+    stat.textContent = "✗ " + (err.reason || err.shortMessage || err.message || "Failed");
     btn.disabled = false;
   }
 }
