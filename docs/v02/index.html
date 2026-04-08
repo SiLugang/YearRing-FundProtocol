@@ -575,9 +575,11 @@ async function loadUserData(addr) {
     const lockIds = await ledger.userLockIds(addr)
     let lockedShares = 0n
     for (const id of lockIds) { const lk = await ledger.getLock(id); if (!lk.unlocked && !lk.earlyExited) lockedShares += lk.shares }
-    freeShares = sharesTotal - lockedShares; usdcBal = usdcB
+    // sharesTotal = vault.balanceOf = free shares only (locked shares are held by LockLedger)
+    freeShares = sharesTotal; usdcBal = usdcB
+    const totalShares = sharesTotal + lockedShares
     document.getElementById('pos-usdc').textContent         = fmt6(usdcB) + ' USDC'
-    document.getElementById('pos-shares-total').textContent = fmt18(sharesTotal) + ' fbUSDC'
+    document.getElementById('pos-shares-total').textContent = fmt18(totalShares) + ' fbUSDC'
     document.getElementById('pos-shares-split').textContent = fmt18(freeShares) + ' free / ' + fmt18(lockedShares) + ' locked'
     document.getElementById('pos-rwt').textContent          = fmt18(rwtB) + ' RWT'
     document.getElementById('pos-lockcount').textContent    = lockCount.toString() + ' / 5'
