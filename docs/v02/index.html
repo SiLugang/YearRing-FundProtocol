@@ -532,15 +532,15 @@ async function doLock() {
   const shares=ethers.parseUnits(s,18), dur=TIER_DURATIONS[selectedTier]
   const btn=document.getElementById('lock-btn'); btn.disabled=true
   try {
-    const al = await vault.allowance(userAddress, ADDR.LockRewardManagerV02)
+    const al = await vault.allowance(userAddress, ADDR.LockLedgerV02)
     if (al<shares) {
       setStatus('lock-status','Approving fbUSDC…','info'); btn.textContent='Approving…'
-      await vault.approve(ADDR.LockRewardManagerV02, shares)
+      await vault.approve(ADDR.LockLedgerV02, shares)
       // Poll allowance until confirmed (handles MetaMask Smart Account / Delegation Manager)
       const deadline = Date.now() + 60000
       let alAfter = 0n
       while (Date.now() < deadline) {
-        alAfter = await vault.allowance(userAddress, ADDR.LockRewardManagerV02)
+        alAfter = await vault.allowance(userAddress, ADDR.LockLedgerV02)
         if (alAfter >= shares) break
         await new Promise(r => setTimeout(r, 2000))
       }
