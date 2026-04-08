@@ -688,15 +688,22 @@ async function onLockInput() {
 }
 function setLockMax() { if (freeShares>0n) document.getElementById('lock-amount').value=ethers.formatUnits(freeShares,18); onLockInput() }
 function updateLockBtn() {
-  const btn=document.getElementById('lock-btn'), amt=parseFloat(document.getElementById('lock-amount').value)
+  const btn=document.getElementById('lock-btn'), warn=document.getElementById('lock-warn')
+  const amt=parseFloat(document.getElementById('lock-amount').value)
   if (!selectedTier) { btn.textContent='Select Tier & Amount to Lock'; btn.disabled=true; return }
   if (!amt||amt<=0)  { btn.textContent='Enter Amount to Lock'; btn.disabled=true; return }
   if (!userAddress)  { btn.disabled=true; return }
+  if (freeShares>0n && ethers.parseUnits(String(amt),18) > freeShares) {
+    warn.textContent='Amount exceeds free fbUSDC balance.'
+    btn.textContent='Insufficient Free fbUSDC'; btn.disabled=true; return
+  }
+  warn.textContent=''
   btn.textContent='Approve fbUSDC → Lock'; btn.disabled=false
 }
 async function doLock() {
   if (!userAddress||!selectedTier) return
   const s = document.getElementById('lock-amount').value; if (!s||parseFloat(s)<=0) return
+  if (ethers.parseUnits(s,18) > freeShares) { setStatus('lock-status','Amount exceeds free fbUSDC balance.','err'); return }
   const shares=ethers.parseUnits(s,18), dur=TIER_DURATIONS[selectedTier]
   const btn=document.getElementById('lock-btn'); btn.disabled=true
   try {
