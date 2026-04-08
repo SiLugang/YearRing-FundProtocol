@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/ILockRewardManagerV02.sol";
 import "./interfaces/ILockLedgerV02.sol";
@@ -131,12 +132,51 @@ contract LockRewardManagerV02 is ILockRewardManagerV02, AccessControl, Pausable,
         whenNotPaused
         returns (uint256 lockId)
     {
+        return _lockWithRewardInternal(msg.sender, shares, duration);
+    }
+
+    /// @notice Lock shares using an EIP-2612 permit signature, removing the need for a
+    ///         separate approve transaction. Suitable for EOA users (including MetaMask Smart Account).
+    /// @dev permit is attempted via try/catch — if already consumed or allowance already sufficient,
+    ///      execution continues. spender in the permit must be address(ledger) (LockLedgerV02).
+    /// @param shares    Number of vault shares to lock (18 decimals)
+    /// @param duration  Lock duration in seconds
+    /// @param deadline  Permit expiry timestamp
+    /// @param v         Permit signature v
+    /// @param r         Permit signature r
+    /// @param s         Permit signature s
+    function lockWithPermit(
+        uint256 shares,
+        uint64  duration,
+        uint256 deadline,
+        uint8   v,
+        bytes32 r,
+        bytes32 s
+    )
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 lockId)
+    {
+        // Try permit — fail silently if already submitted or allowance already in place
+        try IERC20Permit(address(vaultShares)).permit(
+            msg.sender, address(ledger), shares, deadline, v, r, s
+        ) {} catch {}
+
+        return _lockWithRewardInternal(msg.sender, shares, duration);
+    }
+
+    /// @dev Shared lock logic used by both lockWithReward and lockWithPermit.
+    function _lockWithRewardInternal(address owner, uint256 shares, uint64 duration)
+        internal
+        returns (uint256 lockId)
+    {
         // 1. Create lock via LockLedger (OPERATOR_ROLE required on ledger)
         //    Owner must have approved vault shares to LockLedger before calling this.
-        uint256 vsAllowed = vaultShares.allowance(msg.sender, address(ledger));
+        uint256 vsAllowed = vaultShares.allowance(owner, address(ledger));
         if (vsAllowed < shares)
             revert InsufficientVaultSharesAllowance(shares, vsAllowed);
-        lockId = ledger.lockFor(msg.sender, shares, duration);
+        lockId = ledger.lockFor(owner, shares, duration);
 
         // 2. Calculate reward tokens for the full lock duration
         uint256 lockedUSDCValue = _convertToAssets(shares);          // 6-decimal USDC
@@ -154,10 +194,10 @@ contract LockRewardManagerV02 is ILockRewardManagerV02, AccessControl, Pausable,
             uint256 rwAllowed = rewardToken.allowance(treasury, address(this));
             if (rwAllowed < tokens)
                 revert InsufficientRewardTokenAllowance(tokens, rwAllowed);
-            rewardToken.safeTransferFrom(treasury, msg.sender, tokens);
+            rewardToken.safeTransferFrom(treasury, owner, tokens);
         }
 
-        emit LockedWithReward(lockId, msg.sender, shares, tokens);
+        emit LockedWithReward(lockId, owner, shares, tokens);
     }
 
     /// @inheritdoc ILockRewardManagerV02

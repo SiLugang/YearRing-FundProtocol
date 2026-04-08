@@ -308,11 +308,11 @@ const ADDR = {
   ClaimLedger:          '0x5CF9b8EC75314115EDDE5Dd332C193995Dd55234',
 }
 const USDC_ABI = ['function approve(address spender, uint256 amount) returns (bool)','function balanceOf(address account) view returns (uint256)','function allowance(address owner, address spender) view returns (uint256)']
-const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)']
+const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)','function nonces(address owner) view returns (uint256)']
 const RWT_ABI = ['function balanceOf(address account) view returns (uint256)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)']
 const LEDGER_ABI = ['function getLock(uint256 lockId) view returns (tuple(address owner,uint256 shares,uint64 lockedAt,uint64 unlockAt,bool unlocked,bool earlyExited))','function userLockIds(address user) view returns (uint256[])','function activeLockCount(address user) view returns (uint256)','function unlock(uint256 lockId)']
 const BENEFIT_ABI = ['function tierOf(uint256 lockId) view returns (uint8)','function feeDiscountBpsOf(uint256 lockId) view returns (uint256)']
-const LOCK_MGR_ABI = ['function lockWithReward(uint256 shares, uint64 duration) returns (uint256)','function claimRebate(uint256 lockId) returns (uint256)','function earlyExitWithReturn(uint256 lockId)','function previewRebate(uint256 lockId) view returns (uint256)','function issuedRewardTokens(uint256 lockId) view returns (uint256)','function checkEarlyExit(uint256 lockId) view returns (uint256,uint256,uint256,uint256,uint256,uint256)']
+const LOCK_MGR_ABI = ['function lockWithReward(uint256 shares, uint64 duration) returns (uint256)','function lockWithPermit(uint256 shares, uint64 duration, uint256 deadline, uint8 v, bytes32 r, bytes32 s) returns (uint256)','function claimRebate(uint256 lockId) returns (uint256)','function earlyExitWithReturn(uint256 lockId)','function previewRebate(uint256 lockId) view returns (uint256)','function issuedRewardTokens(uint256 lockId) view returns (uint256)','function checkEarlyExit(uint256 lockId) view returns (uint256,uint256,uint256,uint256,uint256,uint256)']
 const BEN_ABI = ['function beneficiaryOf(address user) view returns (address)','function setBeneficiary(address beneficiary)','function updateBeneficiary(address beneficiary)','function revokeBeneficiary()','function heartbeat()','function isInactive(address user) view returns (bool)']
 const METRICS_ABI = ['function snapshot() view returns (tuple(uint256 totalTVL,uint256 totalLockedShares,uint256 lockedRatioBps,uint256 totalLocksEver))']
 
@@ -532,26 +532,44 @@ async function doLock() {
   const shares=ethers.parseUnits(s,18), dur=TIER_DURATIONS[selectedTier]
   const btn=document.getElementById('lock-btn'); btn.disabled=true
   try {
-    const al = await vault.allowance(userAddress, ADDR.LockLedgerV02)
-    if (al<shares) {
-      setStatus('lock-status','Approving fbUSDC…','info'); btn.textContent='Approving…'
-      await vault.approve(ADDR.LockLedgerV02, shares)
-      // Poll allowance until confirmed (handles MetaMask Smart Account / Delegation Manager)
-      const deadline = Date.now() + 60000
-      let alAfter = 0n
-      while (Date.now() < deadline) {
-        alAfter = await vault.allowance(userAddress, ADDR.LockLedgerV02)
-        if (alAfter >= shares) break
-        await new Promise(r => setTimeout(r, 2000))
+    let lockTx
+    // --- Permit path (EOA + MetaMask Smart Account compatible) ---
+    try {
+      const nonce    = await vault.nonces(userAddress)
+      const deadline = BigInt(Math.floor(Date.now()/1000) + 300)
+      const domain   = { name:'FinancialBase Fund', version:'1', chainId:8453, verifyingContract:ADDR.FundVaultV01 }
+      const types    = { Permit:[{name:'owner',type:'address'},{name:'spender',type:'address'},{name:'value',type:'uint256'},{name:'nonce',type:'uint256'},{name:'deadline',type:'uint256'}] }
+      const message  = { owner:userAddress, spender:ADDR.LockLedgerV02, value:shares, nonce, deadline }
+      setStatus('lock-status','Sign permit in wallet…','info'); btn.textContent='Sign Permit…'
+      const sig = await signer.signTypedData(domain, types, message)
+      const {v,r,s:sigS} = ethers.Signature.from(sig)
+      setStatus('lock-status','Locking shares…','info'); btn.textContent='Locking…'
+      lockTx = await lockMgr.lockWithPermit(shares, dur, deadline, v, r, sigS)
+    } catch(permitErr) {
+      // User rejected → rethrow
+      if (permitErr.code===4001||permitErr.action==='ACTION_REJECTED') throw permitErr
+      // Permit unsupported (contract wallet etc.) → fallback to approve
+      const al = await vault.allowance(userAddress, ADDR.LockLedgerV02)
+      if (al<shares) {
+        setStatus('lock-status','Approving fbUSDC…','info'); btn.textContent='Approving…'
+        await vault.approve(ADDR.LockLedgerV02, shares)
+        const pollDeadline = Date.now()+60000
+        let alAfter=0n
+        while (Date.now()<pollDeadline) {
+          alAfter = await vault.allowance(userAddress, ADDR.LockLedgerV02)
+          if (alAfter>=shares) break
+          await new Promise(r=>setTimeout(r,2000))
+        }
+        if (alAfter<shares) {
+          setStatus('lock-status','Approval not detected. Please disable MetaMask Smart Account on Base and retry.','err')
+          return
+        }
       }
-      if (alAfter < shares) {
-        setStatus('lock-status','Approval not detected on-chain. If using MetaMask Smart Account, please switch to a regular EOA account and retry.','err')
-        return
-      }
+      setStatus('lock-status','Locking shares…','info'); btn.textContent='Locking…'
+      lockTx = await lockMgr.lockWithReward(shares, dur)
     }
-    setStatus('lock-status','Locking shares…','info'); btn.textContent='Locking…'
-    const tx = await lockMgr.lockWithReward(shares,dur); await tx.wait()
-    setStatus('lock-status','✓ Locked — '+bsTx(tx.hash),'ok')
+    await lockTx.wait()
+    setStatus('lock-status','✓ Locked — '+bsTx(lockTx.hash),'ok')
     document.getElementById('lock-amount').value=''; document.getElementById('lock-preview').classList.remove('show')
     await loadUserData(userAddress)
   } catch(e) { setStatus('lock-status',shortError(e),'err') }
