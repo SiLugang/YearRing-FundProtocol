@@ -533,7 +533,12 @@ async function doLock() {
   const btn=document.getElementById('lock-btn'); btn.disabled=true
   try {
     const al = await vault.allowance(userAddress, ADDR.LockRewardManagerV02)
-    if (al<shares) { setStatus('lock-status','Approving fbUSDC…','info'); btn.textContent='Approving…'; await (await vault.approve(ADDR.LockRewardManagerV02,shares)).wait() }
+    if (al<shares) {
+      setStatus('lock-status','Approving fbUSDC…','info'); btn.textContent='Approving…'
+      await (await vault.approve(ADDR.LockRewardManagerV02, shares)).wait()
+      const alAfter = await vault.allowance(userAddress, ADDR.LockRewardManagerV02)
+      if (alAfter < shares) { setStatus('lock-status','Approval did not take effect — please try again.','err'); return }
+    }
     setStatus('lock-status','Locking shares…','info'); btn.textContent='Locking…'
     const tx = await lockMgr.lockWithReward(shares,dur); await tx.wait()
     setStatus('lock-status','✓ Locked — '+bsTx(tx.hash),'ok')
