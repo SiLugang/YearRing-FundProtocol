@@ -102,6 +102,28 @@ tr:last-child td{border-bottom:none}
 .version-footer strong{color:var(--text)}
 #net-alert{background:#2d1f00;border-bottom:1px solid var(--yellow);color:var(--yellow);text-align:center;padding:10px;font-size:13px;display:none}
 #net-alert button{margin-left:12px;padding:4px 12px;border-radius:6px;background:var(--yellow);color:#000;border:none;cursor:pointer;font-size:12px}
+.role-panel{border-radius:var(--r);padding:20px;margin-bottom:16px}
+.role-panel.admin-panel{background:#091f1f;border:1px solid #1a4a4a}
+.role-panel.guardian-panel{background:#1f0e00;border:1px solid #5c3200}
+.role-panel.treasury-panel{background:#080f1f;border:1px solid #1a2f5c}
+.role-panel h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px;padding-bottom:8px}
+.role-panel.admin-panel h2{color:#3dc9c9;border-bottom:1px solid #1a4a4a}
+.role-panel.guardian-panel h2{color:var(--orange);border-bottom:1px solid #5c3200}
+.role-panel.treasury-panel h2{color:var(--blue);border-bottom:1px solid #1a2f5c}
+.rp-sub{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #1c2026}
+.rp-sub:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.rp-sub-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.btn-teal{padding:6px 13px;border-radius:6px;font-size:12px;font-weight:600;background:#0d2a2a;color:#3dc9c9;border:1px solid #1a4a4a;cursor:pointer}
+.btn-teal:hover:not(:disabled){background:#1a3838}
+.btn-warn{padding:6px 13px;border-radius:6px;font-size:12px;font-weight:600;background:#2d1f00;color:var(--yellow);border:1px solid #4a3000;cursor:pointer}
+.btn-warn:hover:not(:disabled){background:#3a2800}
+.btn-danger{padding:6px 13px;border-radius:6px;font-size:12px;font-weight:600;background:#2d0808;color:var(--red);border:1px solid #5c1010;cursor:pointer}
+.btn-danger:hover:not(:disabled){background:#3a1010}
+.role-badge{font-size:11px;padding:2px 9px;border-radius:10px;font-weight:600;margin-left:6px}
+.role-badge.admin{background:#0d3a3a;color:#3dc9c9;border:1px solid #1a5555}
+.role-badge.guardian{background:#3a1a00;color:var(--orange);border:1px solid #5c3200}
+.role-badge.treasury{background:#0d1f3a;color:var(--blue);border:1px solid #1a3060}
 </style>
 </head>
 <body>
@@ -117,6 +139,7 @@ tr:last-child td{border-bottom:none}
     <div id="wallet-display" style="display:none">
       <span class="net-badge">Base Mainnet</span>
       <span class="wallet-addr" id="wallet-addr-text"></span>
+      <span id="wallet-role-badge"></span>
       <button id="disconnect-btn" onclick="disconnectWallet()">Disconnect</button>
     </div>
   </div>
@@ -265,6 +288,119 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+  <!-- Admin Panel -->
+  <div class="role-panel admin-panel" id="admin-panel" style="display:none">
+    <h2>Admin Panel — DEFAULT_ADMIN_ROLE</h2>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Allowlist</div>
+      <div class="input-row" style="margin-bottom:8px">
+        <input id="admin-al-addr" type="text" placeholder="0x… address to add or remove" />
+        <button class="btn-teal" onclick="doAllowlistAdd()">Add</button>
+        <button class="btn-danger" onclick="doAllowlistRemove()">Remove</button>
+      </div>
+      <div class="status" id="admin-al-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Deposit / Redeem</div>
+      <div class="btn-row">
+        <button class="btn-warn" onclick="doAdminVault('pauseDeposits','admin-pause-status')">Pause Deposits</button>
+        <button class="btn-teal" onclick="doAdminVault('unpauseDeposits','admin-pause-status')">Unpause Deposits</button>
+        <button class="btn-warn" onclick="doAdminVault('pauseRedeems','admin-pause-status')">Pause Redeems</button>
+        <button class="btn-teal" onclick="doAdminVault('unpauseRedeems','admin-pause-status')">Unpause Redeems</button>
+      </div>
+      <div class="status" id="admin-pause-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">System Mode</div>
+      <div class="btn-row">
+        <button class="btn-teal" onclick="doSetMode(0)">Normal</button>
+        <button class="btn-warn" onclick="doSetMode(1)">Paused</button>
+        <button class="btn-danger" onclick="doSetMode(2)">EmergencyExit</button>
+      </div>
+      <div class="status" id="admin-mode-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Parameters</div>
+      <div class="input-row" style="margin-bottom:6px">
+        <input id="admin-fee-bps" type="number" placeholder="Mgmt fee bps/month (now: 9)" min="0" max="200" />
+        <button class="btn-teal" onclick="doSetMgmtFee()">Set Fee</button>
+      </div>
+      <div class="input-row" style="margin-bottom:6px">
+        <input id="admin-reserve-bps" type="number" placeholder="Reserve ratio bps (now: 3000)" min="0" max="10000" />
+        <button class="btn-teal" onclick="doSetReserveRatio()">Set Reserve</button>
+      </div>
+      <div class="status" id="admin-params-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Strategy</div>
+      <div class="info-row" style="margin-bottom:8px"><span class="info-label">Idle / Total Managed</span><span class="info-value" id="admin-strat-info">—</span></div>
+      <div class="input-row" style="margin-bottom:6px">
+        <input id="admin-invest-amt" type="number" placeholder="USDC to invest into Aave" min="0" step="0.01" />
+        <button class="btn-teal" onclick="doInvest()">Invest</button>
+      </div>
+      <div class="input-row" style="margin-bottom:6px">
+        <input id="admin-divest-amt" type="number" placeholder="USDC to divest from Aave" min="0" step="0.01" />
+        <button class="btn-teal" onclick="doDivest()">Divest</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-danger" onclick="doEmergencyExitStrategy()">Emergency Exit Strategy</button>
+      </div>
+      <div class="status" id="admin-strat-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Fee Accrual (mints fee shares to treasury)</div>
+      <button class="btn-teal" onclick="doAccrueFee('admin-fee-status')">Accrue Management Fee</button>
+      <div class="status" id="admin-fee-status"></div>
+    </div>
+  </div>
+
+  <!-- Guardian Panel -->
+  <div class="role-panel guardian-panel" id="guardian-panel" style="display:none">
+    <h2>Guardian Panel — EMERGENCY_ROLE</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Emergency brake only. Can pause — cannot unpause or change parameters.</div>
+    <div class="btn-row">
+      <button class="btn-warn" onclick="doGuardianPause('deposits')">Pause Deposits</button>
+      <button class="btn-warn" onclick="doGuardianPause('redeems')">Pause Redeems</button>
+      <button class="btn-danger" onclick="doGuardianPause('mode')">Set Mode → Paused</button>
+    </div>
+    <div class="status" id="guardian-status"></div>
+  </div>
+
+  <!-- Treasury Panel -->
+  <div class="role-panel treasury-panel" id="treasury-panel" style="display:none">
+    <h2>Treasury Panel</h2>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Treasury Balances</div>
+      <div class="info-row"><span class="info-label">USDC</span><span class="info-value" id="treasury-usdc">—</span></div>
+      <div class="info-row"><span class="info-label">fbUSDC (shares)</span><span class="info-value" id="treasury-shares">—</span></div>
+      <div class="info-row"><span class="info-label">RWT</span><span class="info-value" id="treasury-rwt">—</span></div>
+      <button onclick="loadTreasuryData()" style="margin-top:8px;padding:5px 14px;font-size:12px;border-radius:6px;background:#21262d;color:var(--text);border:1px solid var(--border);cursor:pointer">↻ Refresh</button>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Fee Accrual (mints fee shares to this address)</div>
+      <button class="btn-teal" onclick="doAccrueFee('treasury-fee-status')">Accrue Management Fee</button>
+      <div class="status" id="treasury-fee-status"></div>
+    </div>
+
+    <div class="rp-sub">
+      <div class="rp-sub-title">Redeem Treasury Shares → USDC</div>
+      <div class="input-row" style="margin-bottom:6px">
+        <input id="treasury-redeem-amt" type="number" placeholder="fbUSDC shares" min="0" step="0.000001" />
+        <button class="max-btn" onclick="setTreasuryRedeemMax()">Max</button>
+      </div>
+      <button class="btn-full" onclick="doTreasuryRedeem()">Redeem</button>
+      <div class="status" id="treasury-redeem-status"></div>
+    </div>
+  </div>
+
   <!-- Contract Addresses -->
   <div class="section">
     <h2>Contract Addresses — Base Mainnet · Chain ID 8453</h2>
@@ -306,9 +442,14 @@ const ADDR = {
   MetricsLayerV02:      '0x4937abE8e01dE6a081CF03b59151733E0Fde63E2',
   GovernanceSignalV02:  '0x9BE5636943d7BfF57ACA6047Cf945FD770CcC7d0',
   ClaimLedger:          '0x5CF9b8EC75314115EDDE5Dd332C193995Dd55234',
+  StrategyManagerV01:   '0xa44d3b9b0ECD6fFa4bD646957468c0B5Bfa64A54',
 }
+const ROLE_ADMIN    = '0x087ea7F67d9282f0bdC43627b855F79789C6824C'
+const ROLE_GUARDIAN = '0xC8052cF447d429f63E890385a6924464B85c5834'
+const ROLE_TREASURY = '0x9d16Eb6A6143A3347f8fA5854B5AA675101Fb705'
 const USDC_ABI = ['function approve(address spender, uint256 amount) returns (bool)','function balanceOf(address account) view returns (uint256)','function allowance(address owner, address spender) view returns (uint256)']
-const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)','function nonces(address owner) view returns (uint256)']
+const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)','function nonces(address owner) view returns (uint256)','function accrueManagementFee()','function pauseDeposits()','function unpauseDeposits()','function pauseRedeems()','function unpauseRedeems()','function setMode(uint8 newMode)','function setMgmtFeeBpsPerMonth(uint256 newBps)','function setReserveRatioBps(uint256 newBps)','function addToAllowlist(address account)','function removeFromAllowlist(address account)','function mgmtFeeBpsPerMonth() view returns (uint256)','function reserveRatioBps() view returns (uint256)']
+const STRAT_MGR_ABI = ['function invest(uint256 amount)','function divest(uint256 amount) returns (uint256)','function returnToVault(uint256 amount)','function emergencyExit()','function totalManagedAssets() view returns (uint256)','function idleUnderlying() view returns (uint256)','function paused() view returns (bool)']
 const RWT_ABI = ['function balanceOf(address account) view returns (uint256)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)']
 const LEDGER_ABI = ['function getLock(uint256 lockId) view returns (tuple(address owner,uint256 shares,uint64 lockedAt,uint64 unlockAt,bool unlocked,bool earlyExited))','function userLockIds(address user) view returns (uint256[])','function activeLockCount(address user) view returns (uint256)','function unlock(uint256 lockId)']
 const BENEFIT_ABI = ['function tierOf(uint256 lockId) view returns (uint8)','function feeDiscountBpsOf(uint256 lockId) view returns (uint256)']
@@ -317,9 +458,9 @@ const BEN_ABI = ['function beneficiaryOf(address user) view returns (address)','
 const METRICS_ABI = ['function snapshot() view returns (tuple(uint256 totalTVL,uint256 totalLockedShares,uint256 lockedRatioBps,uint256 totalLocksEver))']
 
 let provider, signer, userAddress
-let vault, usdc, rwt, ledger, benefit, lockMgr, ben, metrics
+let vault, usdc, rwt, ledger, benefit, lockMgr, ben, metrics, stratMgr
 let selectedTier = null
-let freeShares = 0n, usdcBal = 0n
+let freeShares = 0n, usdcBal = 0n, treasuryShares = 0n
 
 const TIER_DURATIONS   = { bronze: 2592000n, silver: 7776000n, gold: 15552000n }
 const TIER_MULTIPLIERS = { bronze: 10000n,   silver: 13000n,  gold: 18000n }
@@ -358,6 +499,7 @@ async function connectWallet() {
   benefit = new ethers.Contract(ADDR.LockBenefitV02,       BENEFIT_ABI,  signer)
   lockMgr = new ethers.Contract(ADDR.LockRewardManagerV02, LOCK_MGR_ABI, signer)
   ben     = new ethers.Contract(ADDR.BeneficiaryModuleV02, BEN_ABI,      signer)
+  stratMgr = new ethers.Contract(ADDR.StrategyManagerV01, STRAT_MGR_ABI, signer)
   document.getElementById('connect-btn').style.display = 'none'
   document.getElementById('wallet-display').style.display = 'flex'
   document.getElementById('wallet-addr-text').textContent = shortAddr(userAddress)
@@ -366,6 +508,19 @@ async function connectWallet() {
     document.getElementById(k+'-disconnected').style.display = 'none'
     document.getElementById(k+'-connected').style.display = 'block'
   })
+  // Role detection
+  const addrLower = userAddress.toLowerCase()
+  const userRole = addrLower === ROLE_ADMIN.toLowerCase()    ? 'admin'
+                 : addrLower === ROLE_GUARDIAN.toLowerCase() ? 'guardian'
+                 : addrLower === ROLE_TREASURY.toLowerCase() ? 'treasury'
+                 : null
+  document.getElementById('admin-panel').style.display    = userRole === 'admin'    ? 'block' : 'none'
+  document.getElementById('guardian-panel').style.display = userRole === 'guardian' ? 'block' : 'none'
+  document.getElementById('treasury-panel').style.display = userRole === 'treasury' ? 'block' : 'none'
+  document.getElementById('wallet-role-badge').innerHTML  = userRole
+    ? `<span class="role-badge ${userRole}">${userRole.toUpperCase()}</span>` : ''
+  if (userRole === 'treasury') loadTreasuryData()
+  if (userRole === 'admin')    loadAdminStratInfo()
   await loadProtocolData()
   await loadUserData(userAddress)
 }
@@ -387,6 +542,8 @@ function disconnectWallet() {
   document.getElementById('deposit-btn').disabled = true
   document.getElementById('redeem-btn').disabled = true
   document.getElementById('lock-btn').disabled = true
+  ;['admin-panel','guardian-panel','treasury-panel'].forEach(id => document.getElementById(id).style.display = 'none')
+  document.getElementById('wallet-role-badge').innerHTML = ''
 }
 
 async function loadProtocolData() {
@@ -665,6 +822,127 @@ async function doHeartbeat() {
   setStatus('ben-status','Sending heartbeat…','info')
   try { const tx=await ben.heartbeat(); await tx.wait(); setStatus('ben-status','✓ Heartbeat recorded — '+bsTx(tx.hash),'ok') }
   catch(e) { setStatus('ben-status',shortError(e),'err') }
+}
+
+// ── Admin functions ───────────────────────────────────────────────────────────
+async function doAllowlistAdd() {
+  const addr = document.getElementById('admin-al-addr').value.trim()
+  if (!ethers.isAddress(addr)) { setStatus('admin-al-status','Invalid address.','err'); return }
+  setStatus('admin-al-status','Adding…','info')
+  try { const tx = await vault.addToAllowlist(addr); await tx.wait(); setStatus('admin-al-status','✓ Added — '+bsTx(tx.hash),'ok') }
+  catch(e) { setStatus('admin-al-status',shortError(e),'err') }
+}
+async function doAllowlistRemove() {
+  const addr = document.getElementById('admin-al-addr').value.trim()
+  if (!ethers.isAddress(addr)) { setStatus('admin-al-status','Invalid address.','err'); return }
+  setStatus('admin-al-status','Removing…','info')
+  try { const tx = await vault.removeFromAllowlist(addr); await tx.wait(); setStatus('admin-al-status','✓ Removed — '+bsTx(tx.hash),'ok') }
+  catch(e) { setStatus('admin-al-status',shortError(e),'err') }
+}
+async function doAdminVault(method, statusId) {
+  setStatus(statusId, method+'…', 'info')
+  try { const tx = await vault[method](); await tx.wait(); setStatus(statusId,'✓ Done — '+bsTx(tx.hash),'ok'); await loadProtocolData() }
+  catch(e) { setStatus(statusId,shortError(e),'err') }
+}
+async function doSetMode(m) {
+  const labels = ['Normal','Paused','EmergencyExit']
+  if (!confirm('Set system mode to: '+labels[m]+'?')) return
+  setStatus('admin-mode-status','Setting mode…','info')
+  try { const tx = await vault.setMode(m); await tx.wait(); setStatus('admin-mode-status','✓ Mode: '+labels[m]+' — '+bsTx(tx.hash),'ok'); await loadProtocolData() }
+  catch(e) { setStatus('admin-mode-status',shortError(e),'err') }
+}
+async function doSetMgmtFee() {
+  const v = parseInt(document.getElementById('admin-fee-bps').value)
+  if (isNaN(v)||v<0||v>200) { setStatus('admin-params-status','Value must be 0–200.','err'); return }
+  setStatus('admin-params-status','Setting fee…','info')
+  try { const tx = await vault.setMgmtFeeBpsPerMonth(v); await tx.wait(); setStatus('admin-params-status','✓ Fee = '+v+' bps/month — '+bsTx(tx.hash),'ok') }
+  catch(e) { setStatus('admin-params-status',shortError(e),'err') }
+}
+async function doSetReserveRatio() {
+  const v = parseInt(document.getElementById('admin-reserve-bps').value)
+  if (isNaN(v)||v<0||v>10000) { setStatus('admin-params-status','Value must be 0–10000.','err'); return }
+  setStatus('admin-params-status','Setting reserve ratio…','info')
+  try { const tx = await vault.setReserveRatioBps(v); await tx.wait(); setStatus('admin-params-status','✓ Reserve = '+v+' bps — '+bsTx(tx.hash),'ok') }
+  catch(e) { setStatus('admin-params-status',shortError(e),'err') }
+}
+async function loadAdminStratInfo() {
+  try {
+    const [idle, total] = await Promise.all([stratMgr.idleUnderlying(), stratMgr.totalManagedAssets()])
+    document.getElementById('admin-strat-info').textContent = fmt6(idle)+' USDC idle / '+fmt6(total)+' USDC total'
+  } catch(e) { document.getElementById('admin-strat-info').textContent = 'error' }
+}
+async function doInvest() {
+  const s = document.getElementById('admin-invest-amt').value; if (!s||parseFloat(s)<=0) return
+  if (!confirm('Invest '+s+' USDC into Aave strategy?')) return
+  setStatus('admin-strat-status','Transferring to strategy manager…','info')
+  try {
+    const amt = ethers.parseUnits(s,6)
+    const tx1 = await vault.transferToStrategyManager(amt); await tx1.wait()
+    setStatus('admin-strat-status','Investing…','info')
+    const tx2 = await stratMgr.invest(amt); await tx2.wait()
+    setStatus('admin-strat-status','✓ Invested — '+bsTx(tx2.hash),'ok')
+    await loadAdminStratInfo(); await loadProtocolData()
+  } catch(e) { setStatus('admin-strat-status',shortError(e),'err') }
+}
+async function doDivest() {
+  const s = document.getElementById('admin-divest-amt').value; if (!s||parseFloat(s)<=0) return
+  setStatus('admin-strat-status','Divesting…','info')
+  try {
+    const amt = ethers.parseUnits(s,6)
+    const tx = await stratMgr.divest(amt); await tx.wait()
+    setStatus('admin-strat-status','✓ Divested — '+bsTx(tx.hash),'ok')
+    await loadAdminStratInfo(); await loadProtocolData()
+  } catch(e) { setStatus('admin-strat-status',shortError(e),'err') }
+}
+async function doEmergencyExitStrategy() {
+  if (!confirm('Emergency exit all funds from Aave strategy?\nThis will return all assets to vault.')) return
+  setStatus('admin-strat-status','Emergency exiting…','info')
+  try { const tx = await stratMgr.emergencyExit(); await tx.wait(); setStatus('admin-strat-status','✓ Emergency exit complete — '+bsTx(tx.hash),'ok'); await loadAdminStratInfo(); await loadProtocolData() }
+  catch(e) { setStatus('admin-strat-status',shortError(e),'err') }
+}
+async function doAccrueFee(statusId) {
+  setStatus(statusId,'Accruing fee…','info')
+  try { const tx = await vault.accrueManagementFee(); await tx.wait(); setStatus(statusId,'✓ Done — '+bsTx(tx.hash),'ok'); await loadProtocolData(); if (userAddress.toLowerCase()===ROLE_TREASURY.toLowerCase()) loadTreasuryData() }
+  catch(e) { setStatus(statusId,shortError(e),'err') }
+}
+
+// ── Guardian functions ────────────────────────────────────────────────────────
+async function doGuardianPause(type) {
+  setStatus('guardian-status','Submitting…','info')
+  try {
+    let tx
+    if (type==='deposits') tx = await vault.pauseDeposits()
+    else if (type==='redeems') tx = await vault.pauseRedeems()
+    else tx = await vault.setMode(1)
+    await tx.wait()
+    setStatus('guardian-status','✓ Done — '+bsTx(tx.hash),'ok')
+    await loadProtocolData()
+  } catch(e) { setStatus('guardian-status',shortError(e),'err') }
+}
+
+// ── Treasury functions ────────────────────────────────────────────────────────
+async function loadTreasuryData() {
+  try {
+    const [u, s, r] = await Promise.all([usdc.balanceOf(ROLE_TREASURY), vault.balanceOf(ROLE_TREASURY), rwt.balanceOf(ROLE_TREASURY)])
+    treasuryShares = s
+    document.getElementById('treasury-usdc').textContent   = fmt6(u)+' USDC'
+    document.getElementById('treasury-shares').textContent = fmt18(s)+' fbUSDC'
+    document.getElementById('treasury-rwt').textContent    = fmt18(r)+' RWT'
+  } catch(e) { console.error('loadTreasuryData',e) }
+}
+function setTreasuryRedeemMax() {
+  if (treasuryShares>0n) { document.getElementById('treasury-redeem-amt').value = ethers.formatUnits(treasuryShares,18) }
+}
+async function doTreasuryRedeem() {
+  const s = document.getElementById('treasury-redeem-amt').value; if (!s||parseFloat(s)<=0) return
+  setStatus('treasury-redeem-status','Redeeming…','info')
+  try {
+    const shares = ethers.parseUnits(s,18)
+    const tx = await vault.redeem(shares, userAddress, userAddress); await tx.wait()
+    setStatus('treasury-redeem-status','✓ Done — '+bsTx(tx.hash),'ok')
+    document.getElementById('treasury-redeem-amt').value = ''
+    await loadTreasuryData()
+  } catch(e) { setStatus('treasury-redeem-status',shortError(e),'err') }
 }
 
 function buildAddrTable() {
