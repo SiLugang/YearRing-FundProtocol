@@ -246,7 +246,8 @@ tr:last-child td{border-bottom:none}
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px" id="lock-capacity">Active locks: — / 5</div>
     <div class="preview-block" id="lock-preview">
       <div class="info-row"><span class="info-label">Estimated RWT (upfront)</span><span class="info-value" id="prev-rwt">—</span></div>
-      <div class="info-row"><span class="info-label">Management fee discount</span><span class="info-value" id="prev-discount">—</span></div>
+      <div class="info-row"><span class="info-label">Fee discount (rebate)</span><span class="info-value" id="prev-discount">—</span></div>
+      <div class="info-row"><span class="info-label">Est. total rebate over lock</span><span class="info-value" id="prev-rebate">—</span></div>
       <div class="info-row"><span class="info-label">Unlock date</span><span class="info-value" id="prev-unlock">—</span></div>
       <div style="font-size:11px;color:var(--yellow);margin-top:8px">⚠ Locked shares cannot be redeemed until unlock date. Early exit requires returning all issued RWT.</div>
     </div>
@@ -680,8 +681,16 @@ async function onLockInput() {
     const usdcVal = await vault.convertToAssets(shares)
     const dur = TIER_DURATIONS[selectedTier], mul = TIER_MULTIPLIERS[selectedTier]
     const rwtPrev = usdcVal * 1_000_000_000_000n * (dur/86400n) * mul / (10000n*500n)
+    // Rebate = shares × mgmtFeeBps × discountBps × lockDuration / (BPS² × SECONDS_PER_MONTH)
+    const DISCOUNT_BPS = { bronze: 2000n, silver: 4000n, gold: 6000n }
+    const SECONDS_PER_MONTH = 2592000n
+    let mgmtBps = 9n
+    try { mgmtBps = await vault.mgmtFeeBpsPerMonth() } catch {}
+    const rebatePrev = shares * mgmtBps * DISCOUNT_BPS[selectedTier] * dur
+                       / (10000n * 10000n * SECONDS_PER_MONTH)
     document.getElementById('prev-rwt').textContent     = fmt18(rwtPrev)+' RWT'
-    document.getElementById('prev-discount').textContent = TIER_DISCOUNTS[selectedTier]
+    document.getElementById('prev-discount').textContent = TIER_DISCOUNTS[selectedTier]+' → est. '+fmt18(rebatePrev)+' fbUSDC back'
+    document.getElementById('prev-rebate').textContent  = fmt18(rebatePrev)+' fbUSDC (≈'+fmt6(await vault.convertToAssets(rebatePrev))+' USDC)'
     document.getElementById('prev-unlock').textContent  = new Date(Date.now()+Number(dur)*1000).toLocaleDateString()
     document.getElementById('lock-preview').classList.add('show')
   } catch { document.getElementById('lock-preview').classList.remove('show') }
