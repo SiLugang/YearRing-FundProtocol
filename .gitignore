@@ -6,3 +6,4 @@ deployments/
 .env
 .DS_Store
 dist/
+fd/
