@@ -2,8 +2,8 @@
  * deploy.ts — FinancialBase V01 full deployment
  *
  * Deploys:
- *   MockUSDC (local only)  →  FundVaultV01  →  StrategyManagerV01
- *   →  AaveV3StrategyV01 (mainnet/testnet) or DummyStrategy (local)
+ *   MockUSDC + DummyStrategy  (local networks OR DEPLOY_DEMO_MODE=true)
+ *   Real USDC + AaveV3StrategyV01  (live networks without DEPLOY_DEMO_MODE)
  *
  * Wire-up:
  *   vault.setModules(strategyManager)
@@ -14,7 +14,7 @@
  *
  * Usage:
  *   npx hardhat run scripts/deploy.ts --network hardhat
- *   npx hardhat run scripts/deploy.ts --network baseSepolia
+ *   DEPLOY_DEMO_MODE=true npx hardhat run scripts/deploy.ts --network baseSepolia
  *   npx hardhat run scripts/deploy.ts --network base
  */
 
@@ -30,6 +30,7 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   const cfg = getConfig(network.name);
   const isLocal = network.name === "hardhat" || network.name === "localhost";
+  const isDemoMode = isLocal || process.env.DEPLOY_DEMO_MODE === "true";
 
   // ---------------------------------------------------------------------------
   // Roles
@@ -57,7 +58,7 @@ async function main() {
   // ---------------------------------------------------------------------------
   let usdcAddress: string;
 
-  if (isLocal) {
+  if (isDemoMode) {
     const usdc = await (await ethers.getContractFactory("MockUSDC")).deploy();
     await usdc.waitForDeployment();
     usdcAddress = await usdc.getAddress();
@@ -76,7 +77,6 @@ async function main() {
     "FinancialBase Fund",
     "fbUSDC",
     treasury,
-    guardian,
     admin
   );
   await vault.waitForDeployment();
@@ -89,8 +89,7 @@ async function main() {
   const manager = await (await ethers.getContractFactory("StrategyManagerV01")).deploy(
     usdcAddress,
     vaultAddress,
-    admin,
-    guardian
+    admin
   );
   await manager.waitForDeployment();
   const managerAddress = await manager.getAddress();
@@ -102,7 +101,7 @@ async function main() {
   let strategyAddress: string;
   let strategyName: string;
 
-  if (isLocal) {
+  if (isDemoMode) {
     const dummy = await (await ethers.getContractFactory("DummyStrategy")).deploy(usdcAddress);
     await dummy.waitForDeployment();
     strategyAddress = await dummy.getAddress();
@@ -165,7 +164,7 @@ async function main() {
     deployer: deployer.address,
     timestamp: new Date().toISOString(),
     contracts: {
-      MockUSDC:           isLocal ? usdcAddress : undefined,
+      MockUSDC:           isDemoMode ? usdcAddress : undefined,
       USDC:               usdcAddress,
       FundVaultV01:       vaultAddress,
       StrategyManagerV01: managerAddress,

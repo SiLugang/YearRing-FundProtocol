@@ -4,7 +4,19 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x" + "0".repeat(64);
+// Primary deployer key (admin / guardian / treasury on testnet demo)
+// Fallback is a valid non-zero dummy (all-zeros is rejected by the curve library)
+const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x" + "a".repeat(64);
+
+// Optional per-persona keys for testnet seed.
+// Fallback to sequential dummy keys so Hardhat never throws on missing values.
+const ALICE_KEY = process.env.ALICE_PRIVATE_KEY || "0x" + "1".repeat(64);
+const BOB_KEY   = process.env.BOB_PRIVATE_KEY   || "0x" + "2".repeat(64);
+const CAROL_KEY = process.env.CAROL_PRIVATE_KEY  || "0x" + "3".repeat(64);
+
+const TREASURY_KEY = process.env.TREASURY_PRIVATE_KEY || "0x" + "4".repeat(64);
+
+const TESTNET_ACCOUNTS = [PRIVATE_KEY, ALICE_KEY, BOB_KEY, CAROL_KEY, TREASURY_KEY];
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -23,16 +35,19 @@ const config: HardhatUserConfig = {
     },
     localhost: {
       url: "http://127.0.0.1:8545",
-      accounts: [PRIVATE_KEY],
+      // Use the running node's own accounts (Hardhat default signers)
+      accounts: "remote",
     },
     baseSepolia: {
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
-      accounts: [PRIVATE_KEY],
+      accounts: TESTNET_ACCOUNTS,
       chainId: 84532,
     },
     base: {
-      url: process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org",
-      accounts: [PRIVATE_KEY],
+      // BASE_MAINNET_RPC_URL must be set in .env (QuickNode / Alchemy Base Mainnet endpoint)
+      // Do NOT fall back to https://mainnet.base.org — public node is unstable for production use
+      url: process.env.BASE_MAINNET_RPC_URL || (() => { throw new Error("BASE_MAINNET_RPC_URL is not set. Add your QuickNode/Alchemy Base Mainnet endpoint to .env"); })(),
+      accounts: TESTNET_ACCOUNTS,
       chainId: 8453,
     },
   },

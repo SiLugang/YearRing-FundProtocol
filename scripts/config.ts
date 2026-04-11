@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // Deployment configuration per network
 // ---------------------------------------------------------------------------
+import { ethers } from "ethers";
 
 export interface NetworkConfig {
   // Token addresses
@@ -13,7 +14,7 @@ export interface NetworkConfig {
 
   // Protocol parameters
   reserveRatioBps: number;   // e.g. 3000 = 30% reserve
-  mgmtFeeBpsPerMonth: number; // e.g. 50 = 0.5%/month
+  mgmtFeeBpsPerMonth: number; // e.g. 9 ≈ 1%/year
   investCap: bigint;          // 0 = unlimited
   minIdle: bigint;            // 0 = no floor
 
@@ -38,7 +39,7 @@ export const baseMainnet: NetworkConfig = {
   aaveReferralCode:     0,
 
   reserveRatioBps:      3000,                        // 30% reserve
-  mgmtFeeBpsPerMonth:   50,                          // 0.5% / month
+  mgmtFeeBpsPerMonth:   9,                           // ~1% / year (9 bps/month)
   investCap:            0n,                          // unlimited
   minIdle:              0n,
 
@@ -62,7 +63,7 @@ export const baseSepolia: NetworkConfig = {
   aaveReferralCode:     0,
 
   reserveRatioBps:      3000,
-  mgmtFeeBpsPerMonth:   50,
+  mgmtFeeBpsPerMonth:   9,                           // ~1% / year (9 bps/month)
   investCap:            0n,
   minIdle:              0n,
 
@@ -85,7 +86,7 @@ export const local: NetworkConfig = {
   aaveReferralCode:     0,
 
   reserveRatioBps:      3000,
-  mgmtFeeBpsPerMonth:   50,
+  mgmtFeeBpsPerMonth:   9,                           // ~1% / year (9 bps/month)
   investCap:            0n,
   minIdle:              0n,
 
@@ -99,9 +100,44 @@ export const local: NetworkConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// V2 Demo Config
+// ---------------------------------------------------------------------------
+
+export interface V2DemoConfig {
+  // Demo deposit amounts (USDC, 6 decimals)
+  aliceDeposit: bigint;   // Scene B — long-term user
+  bobDeposit:   bigint;   // Scene A observer / beneficiary recipient
+  carolDeposit: bigint;   // Scene C — beneficiary origin
+
+  // Lock durations (seconds)
+  goldDuration:   bigint; // 180 days — alice (Scene B)
+  silverDuration: bigint; // 90 days  — carol (Scene C)
+
+  // Governance signal params
+  votingThreshold: bigint; // minimum RWT to create a proposal
+  votingPeriod:    bigint; // voting window in seconds
+
+  // RewardToken
+  rewardTotalSupply: bigint;
+}
+
+export const v2DemoConfig: V2DemoConfig = {
+  aliceDeposit:  1_000_000_000n,   // 1000 USDC (6 decimals)
+  bobDeposit:      200_000_000n,   // 200 USDC
+  carolDeposit:    500_000_000n,   // 500 USDC
+
+  goldDuration:   180n * 86400n,   // 180 days in seconds
+  silverDuration:  90n * 86400n,   // 90 days in seconds
+
+  votingThreshold: 100n * 10n**18n, // 100 RWT (18 decimals)
+  votingPeriod:    7n * 86400n,     // 7-day voting window
+
+  rewardTotalSupply: 20_000_000n * 10n**18n, // 20,000,000 RWT
+};
+
+// ---------------------------------------------------------------------------
 // Selector
 // ---------------------------------------------------------------------------
-import { ethers } from "ethers";
 
 export function getConfig(networkName: string): NetworkConfig {
   switch (networkName) {

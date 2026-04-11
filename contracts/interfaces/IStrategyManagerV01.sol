@@ -8,4 +8,10 @@ interface IStrategyManagerV01 {
     /// @dev Must account for all deployed capital across all strategies
     /// @return Total managed assets denominated in the vault's underlying asset
     function totalManagedAssets() external view returns (uint256);
+
+    /// @notice Called exclusively by the vault's permissionless rebalance() to pull funds
+    ///         back when reserve ratio falls below the floor.
+    /// @dev Only callable by vault address. Divests `amount` from strategy, then
+    ///      transfers idle to vault. A failure here causes rebalance() to emit RebalanceDivestFailed.
+    function returnForRebalance(uint256 amount) external;
 }

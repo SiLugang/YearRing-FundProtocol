@@ -19,8 +19,9 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     // -------------------------------------------------------------------------
     // Roles
     // -------------------------------------------------------------------------
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
+
+    /// @notice Can pause the strategy manager (stop new invest() calls). Cannot reset balances.
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
 
     // -------------------------------------------------------------------------
     // Custom errors
@@ -32,6 +33,8 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     error InvalidUnderlying(address expected, address got);
     error NoStrategy();
     error OldStrategyNotEmpty(uint256 remaining);
+    error NotInNormalMode();
+    error NotVault();
 
     // -------------------------------------------------------------------------
     // Events
@@ -42,6 +45,7 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     event Divested(uint256 requested, uint256 withdrawn);
     event ReturnedToVault(uint256 amount);
     event EmergencyExitTriggered();
+    event PartialEmergencyExitTriggered(uint256 amount);
     event LimitsSet(uint256 investCap, uint256 minIdle);
 
     // -------------------------------------------------------------------------
@@ -70,27 +74,21 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     /// @param underlying_ Underlying ERC20 asset address
     /// @param vault_ FundVaultV01 address
     /// @param admin_ DEFAULT_ADMIN_ROLE holder (timelock / multisig)
-    /// @param guardian_ GUARDIAN_ROLE holder (emergency pause only)
     constructor(
         address underlying_,
         address vault_,
-        address admin_,
-        address guardian_
+        address admin_
     ) {
         if (
             underlying_ == address(0) ||
             vault_      == address(0) ||
-            admin_      == address(0) ||
-            guardian_   == address(0)
+            admin_      == address(0)
         ) revert ZeroAddress();
 
         underlying = IERC20(underlying_);
         vault = vault_;
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin_);
-        _grantRole(OPERATOR_ROLE, admin_);
-        _grantRole(GUARDIAN_ROLE, admin_);
-        _grantRole(GUARDIAN_ROLE, guardian_);
     }
 
     // -------------------------------------------------------------------------
@@ -121,12 +119,22 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     }
 
     // -------------------------------------------------------------------------
-    // Capital operations (OPERATOR or ADMIN)
+    // Capital operations (DEFAULT_ADMIN_ROLE)
     // -------------------------------------------------------------------------
 
     /// @notice Deploy `amount` of idle underlying into the active strategy
     /// @dev Blocked when paused. Enforces investCap and minIdle constraints.
-    function invest(uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant whenNotPaused {
+    ///      Also blocked when vault is in non-Normal mode.
+    function invest(uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused {
+        // Block invest in non-Normal modes
+        if (vault != address(0)) {
+            (bool ok, bytes memory data) = vault.staticcall(abi.encodeWithSignature("systemMode()"));
+            if (ok && data.length == 32) {
+                uint8 vaultMode = abi.decode(data, (uint8));
+                if (vaultMode != 0) revert NotInNormalMode();
+            }
+        }
+
         if (amount == 0) revert ZeroAmount();
         if (strategy == address(0)) revert NoStrategy();
 
@@ -148,7 +156,7 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
 
     /// @notice Pull `amount` of underlying back from strategy to this contract
     /// @return withdrawn Actual amount received (may differ from requested)
-    function divest(uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant returns (uint256 withdrawn) {
+    function divest(uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant returns (uint256 withdrawn) {
         if (amount == 0) revert ZeroAmount();
         if (strategy == address(0)) revert NoStrategy();
 
@@ -160,7 +168,7 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
     }
 
     /// @notice Transfer idle underlying from this contract back to vault
-    function returnToVault(uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant {
+    function returnToVault(uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (vault == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
 
@@ -172,14 +180,58 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
         emit ReturnedToVault(amount);
     }
 
-    /// @notice Trigger emergency withdrawal from strategy — pulls as much as possible back here
+    /// @notice Trigger emergency withdrawal from strategy — pulls as much as possible back here,
+    ///         then auto-forwards all idle USDC to vault
     /// @dev Intentionally NOT blocked by pause, to always allow capital recovery
-    function emergencyExit() external onlyRole(OPERATOR_ROLE) nonReentrant {
+    function emergencyExit() external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (strategy == address(0)) revert NoStrategy();
 
         IStrategyV01(strategy).emergencyExit();
 
+        // Auto-forward all idle USDC to vault
+        uint256 idle = underlying.balanceOf(address(this));
+        if (idle > 0 && vault != address(0)) {
+            underlying.safeTransfer(vault, idle);
+            emit ReturnedToVault(idle);
+        }
+
         emit EmergencyExitTriggered();
+    }
+
+    /// @notice Partially withdraw `amount` from strategy, then auto-forward all idle to vault
+    function partialEmergencyExit(uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        if (strategy == address(0)) revert NoStrategy();
+
+        IStrategyV01(strategy).partialEmergencyExit(amount);
+
+        // Auto-forward all idle USDC to vault
+        uint256 idle = underlying.balanceOf(address(this));
+        if (idle > 0 && vault != address(0)) {
+            underlying.safeTransfer(vault, idle);
+            emit ReturnedToVault(idle);
+        }
+
+        emit PartialEmergencyExitTriggered(amount);
+    }
+
+    /// @notice Pull `amount` from strategy and forward to vault; called by vault rebalance() only.
+    /// @dev Bypasses role check — gated by vault address comparison instead.
+    ///      Divest failure is not re-thrown; vault rebalance() catches via try/catch.
+    function returnForRebalance(uint256 amount) external override nonReentrant {
+        if (msg.sender != vault) revert NotVault();
+        if (amount == 0) revert ZeroAmount();
+        if (strategy == address(0)) revert NoStrategy();
+
+        uint256 before = underlying.balanceOf(address(this));
+        IStrategyV01(strategy).divest(amount);
+        uint256 withdrawn = underlying.balanceOf(address(this)) - before;
+
+        uint256 toReturn = withdrawn < amount ? withdrawn : amount;
+        if (toReturn > 0) {
+            underlying.safeTransfer(vault, toReturn);
+            emit ReturnedToVault(toReturn);
+        }
+        emit Divested(amount, withdrawn);
     }
 
     // -------------------------------------------------------------------------
@@ -225,14 +277,17 @@ contract StrategyManagerV01 is IStrategyManagerV01, AccessControl, Pausable, Ree
 
     // -------------------------------------------------------------------------
     // Pause controls
+    // EMERGENCY_ROLE or DEFAULT_ADMIN_ROLE can pause. Only DEFAULT_ADMIN_ROLE can unpause.
     // -------------------------------------------------------------------------
 
-    /// @notice Pause: blocks invest(). GUARDIAN or ADMIN.
-    function pause() external onlyRole(GUARDIAN_ROLE) {
+    /// @notice Pause: blocks invest(). EMERGENCY_ROLE or DEFAULT_ADMIN_ROLE.
+    function pause() external {
+        if (!hasRole(EMERGENCY_ROLE, msg.sender) && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender))
+            revert("AccessControl: unauthorized");
         _pause();
     }
 
-    /// @notice Unpause: ADMIN only.
+    /// @notice Unpause: DEFAULT_ADMIN_ROLE only.
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
     }

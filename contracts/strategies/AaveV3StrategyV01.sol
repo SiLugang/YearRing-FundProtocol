@@ -31,6 +31,7 @@ contract AaveV3StrategyV01 is IStrategyV01, ReentrancyGuard {
     event Invested(uint256 amount);
     event Divested(uint256 requested, uint256 withdrawn);
     event EmergencyExit(uint256 withdrawn);
+    event PartialEmergencyExit(uint256 requested, uint256 withdrawn);
 
     // -------------------------------------------------------------------------
     // Immutable state
@@ -180,5 +181,21 @@ contract AaveV3StrategyV01 is IStrategyV01, ReentrancyGuard {
         lastEmergencyExitAt = block.timestamp;
 
         emit EmergencyExit(total);
+    }
+
+    /// @notice Partially withdraw `amount` of USDC from Aave and forward to manager
+    /// @param amount Amount of USDC to withdraw from Aave
+    function partialEmergencyExit(uint256 amount) external override onlyManager nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+
+        uint256 before = underlyingToken.balanceOf(address(this));
+        pool.withdraw(address(underlyingToken), amount, address(this));
+        uint256 withdrawn = underlyingToken.balanceOf(address(this)) - before;
+
+        if (withdrawn > 0) {
+            underlyingToken.safeTransfer(manager, withdrawn);
+        }
+
+        emit PartialEmergencyExit(amount, withdrawn);
     }
 }

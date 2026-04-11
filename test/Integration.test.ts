@@ -10,7 +10,6 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
   let usdc: MockUSDC;
 
   let admin: SignerWithAddress;
-  let guardian: SignerWithAddress;
   let treasury: SignerWithAddress;
   let alice: SignerWithAddress;
   let bob: SignerWithAddress;
@@ -18,19 +17,18 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
   const D6 = (n: number) => ethers.parseUnits(String(n), 6);
 
   async function fullSetup() {
-    [, admin, guardian, treasury, alice, bob] = await ethers.getSigners();
+    [, admin, treasury, alice, bob] = await ethers.getSigners();
 
     usdc = await (await ethers.getContractFactory("MockUSDC")).deploy();
 
     vault = await (await ethers.getContractFactory("FundVaultV01")).deploy(
       await usdc.getAddress(), "Fund Vault", "fvUSDC",
-      treasury.address, guardian.address, admin.address
+      treasury.address, admin.address
     );
     manager = await (await ethers.getContractFactory("StrategyManagerV01")).deploy(
       await usdc.getAddress(),
       await vault.getAddress(),
-      admin.address,
-      guardian.address
+      admin.address
     );
     strategy = await (await ethers.getContractFactory("DummyStrategy")).deploy(
       await usdc.getAddress()
@@ -41,7 +39,7 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
     await vault.connect(admin).setExternalTransfersEnabled(true);
     await vault.connect(admin).setReserveRatioBps(3000); // 30% reserve
 
-    await manager.connect(guardian).pause();
+    await manager.connect(admin).pause();
     await manager.connect(admin).setStrategy(await strategy.getAddress());
     await manager.connect(admin).unpause();
 
@@ -50,6 +48,8 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
     await usdc.mint(bob.address, D6(10_000));
     await usdc.connect(alice).approve(await vault.getAddress(), ethers.MaxUint256);
     await usdc.connect(bob).approve(await vault.getAddress(), ethers.MaxUint256);
+    await vault.connect(admin).addToAllowlist(alice.address);
+    await vault.connect(admin).addToAllowlist(bob.address);
   }
 
   beforeEach(fullSetup);
@@ -146,10 +146,11 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
   describe("4.3 redemption path when vault is underfunded", function () {
     it("redeem fails when vault has insufficient USDC", async function () {
       await vault.connect(alice).deposit(D6(1000), alice.address);
-      // Transfer all to manager
-      await vault.connect(admin).setReserveRatioBps(0);
-      await vault.connect(admin).transferToStrategyManager(D6(1000));
-      await manager.connect(admin).invest(D6(1000));
+      // Transfer 70% to manager (V3 hard cap: max 70% deployment)
+      // Vault retains 300 USDC; alice's shares are worth 1000 USDC → redeem still fails
+      await vault.connect(admin).setReserveRatioBps(3000);
+      await vault.connect(admin).transferToStrategyManager(D6(700));
+      await manager.connect(admin).invest(D6(700));
 
       const shares = await vault.balanceOf(alice.address);
       await expect(
@@ -159,15 +160,15 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
 
     it("divest + returnToVault enables redeem", async function () {
       await vault.connect(alice).deposit(D6(1000), alice.address);
-      await vault.connect(admin).setReserveRatioBps(0);
-      await vault.connect(admin).transferToStrategyManager(D6(1000));
-      await manager.connect(admin).invest(D6(1000));
+      await vault.connect(admin).setReserveRatioBps(3000);
+      await vault.connect(admin).transferToStrategyManager(D6(700));
+      await manager.connect(admin).invest(D6(700));
 
-      // Operator divests and returns to vault
-      await manager.connect(admin).divest(D6(1000));
-      await manager.connect(admin).returnToVault(D6(1000));
+      // Operator divests and returns deployed portion to vault
+      await manager.connect(admin).divest(D6(700));
+      await manager.connect(admin).returnToVault(D6(700));
 
-      // Alice can now redeem
+      // Alice can now redeem (vault has 300 reserve + 700 returned = 1000)
       const shares = await vault.balanceOf(alice.address);
       const before = await usdc.balanceOf(alice.address);
       await vault.connect(alice).redeem(shares, alice.address, alice.address);
@@ -179,19 +180,21 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
   // 4.4 紧急退出路径
   // ---------------------------------------------------------------------------
   describe("4.4 emergency exit path", function () {
-    it("pause → emergencyExit → returnToVault → redeem succeeds", async function () {
+    it("pause → emergencyExit → redeem succeeds (auto-forward to vault)", async function () {
       await vault.connect(alice).deposit(D6(1000), alice.address);
-      await vault.connect(admin).setReserveRatioBps(0);
-      await vault.connect(admin).transferToStrategyManager(D6(1000));
-      await manager.connect(admin).invest(D6(1000));
+      // Deploy 70% to strategy (V3 hard cap)
+      await vault.connect(admin).setReserveRatioBps(3000);
+      await vault.connect(admin).transferToStrategyManager(D6(700));
+      await manager.connect(admin).invest(D6(700));
 
-      // Emergency flow
-      await manager.connect(guardian).pause();
+      // Emergency flow: emergencyExit auto-forwards idle to vault
+      await manager.connect(admin).pause();
       await manager.connect(admin).emergencyExit();
-      const idle = await manager.idleUnderlying();
-      await manager.connect(admin).returnToVault(idle);
 
-      // Alice redeems successfully
+      // Manager should have 0 idle; vault should have received the deployed funds back
+      expect(await manager.idleUnderlying()).to.equal(0);
+
+      // Alice redeems successfully (vault now has 300 reserve + 700 returned = 1000)
       const shares = await vault.balanceOf(alice.address);
       const before = await usdc.balanceOf(alice.address);
       await vault.connect(alice).redeem(shares, alice.address, alice.address);
@@ -200,16 +203,16 @@ describe("Integration: FundVaultV01 + StrategyManagerV01 + DummyStrategy", funct
 
     it("totalAssets still correct during emergency (strategy empty after exit)", async function () {
       await vault.connect(alice).deposit(D6(1000), alice.address);
-      await vault.connect(admin).setReserveRatioBps(0);
-      await vault.connect(admin).transferToStrategyManager(D6(1000));
-      await manager.connect(admin).invest(D6(1000));
+      await vault.connect(admin).setReserveRatioBps(3000);
+      await vault.connect(admin).transferToStrategyManager(D6(700));
+      await manager.connect(admin).invest(D6(700));
 
-      await manager.connect(guardian).pause();
+      await manager.connect(admin).pause();
       await manager.connect(admin).emergencyExit();
 
-      // Strategy now empty, idle is in manager
+      // Strategy now empty; funds auto-forwarded to vault
       expect(await strategy.totalUnderlying()).to.equal(0);
-      expect(await manager.idleUnderlying()).to.equal(D6(1000));
+      expect(await manager.idleUnderlying()).to.equal(0);
       expect(await vault.totalAssets()).to.equal(D6(1000));
     });
   });

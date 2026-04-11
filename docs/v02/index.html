@@ -152,11 +152,18 @@ tr:last-child td{border-bottom:none}
 
 <div class="container">
 
-  <div class="allowlist-banner">
+  <div class="allowlist-banner" id="allowlist-info-banner">
     <div class="icon">🔒</div>
     <div>
       <div class="title">Allowlist / Invitation Mode</div>
-      <div class="desc">Deposits require prior approval from the fund admin. This is not a public product. Lock, beneficiary, and governance features are available to all connected wallets.</div>
+      <div class="desc">Deposits require prior approval from the fund admin. This is not a public product.</div>
+    </div>
+  </div>
+  <div class="allowlist-banner" id="not-allowlisted-banner" style="display:none;border-color:var(--red);background:#1a0808">
+    <div class="icon">⛔</div>
+    <div>
+      <div class="title" style="color:var(--red)">Address Not Allowlisted</div>
+      <div class="desc">Your wallet address is not on the deposit allowlist. Deposit, lock, and beneficiary features are restricted to invited participants. Contact the fund admin to request access.</div>
     </div>
   </div>
 
@@ -187,13 +194,13 @@ tr:last-child td{border-bottom:none}
         <div class="info-row"><span class="info-label">Active Locks</span><span class="info-value" id="pos-lockcount">—</span></div>
       </div>
       <div class="pills" id="pos-pills"></div>
-      <button onclick="loadUserData(userAddress)" style="margin-top:12px;padding:5px 14px;font-size:12px;border-radius:6px;background:#21262d;color:var(--text);border:1px solid var(--border);cursor:pointer">↻ Refresh</button>
+      <button id="pos-refresh-btn" onclick="posRefresh()" style="margin-top:12px;padding:5px 14px;font-size:12px;border-radius:6px;background:#21262d;color:var(--text);border:1px solid var(--border);cursor:pointer">↻ Refresh</button>
     </div>
   </div>
 
   <!-- Deposit / Redeem -->
-  <div class="action-grid">
-    <div class="action-panel">
+  <div class="action-grid" id="deposit-redeem-section">
+    <div class="action-panel" id="deposit-panel">
       <div class="action-title">Deposit USDC → fbUSDC</div>
       <div class="input-row">
         <input id="deposit-amount" type="number" placeholder="USDC amount" min="0" step="0.01" oninput="onDepositInput()" />
@@ -206,6 +213,7 @@ tr:last-child td{border-bottom:none}
     </div>
     <div class="action-panel">
       <div class="action-title">Redeem fbUSDC → USDC</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Only <strong>free</strong> (unlocked) shares can be redeemed. Locked shares must be unlocked first.</div>
       <div class="input-row">
         <input id="redeem-shares" type="number" placeholder="fbUSDC shares" min="0" step="0.000001" oninput="onRedeemInput()" />
         <button class="max-btn" onclick="setRedeemMax()">Max</button>
@@ -223,7 +231,7 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <!-- Lock -->
-  <div class="section">
+  <div class="section" id="lock-section">
     <h2>Lock fbUSDC Shares — Earn RWT + Fee Discount</h2>
     <div class="tier-btns">
       <div class="tier-btn" id="tier-bronze" onclick="selectTier('bronze')">
@@ -268,7 +276,7 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <!-- Beneficiary -->
-  <div class="section">
+  <div class="section" id="beneficiary-section">
     <h2>Beneficiary / Inheritance</h2>
     <div id="beneficiary-disconnected" style="color:var(--muted);font-size:13px">Connect wallet to manage beneficiary settings.</div>
     <div id="beneficiary-connected" style="display:none">
@@ -282,10 +290,10 @@ tr:last-child td{border-bottom:none}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
         <button class="btn-sm blue" onclick="doSetBeneficiary()">Set / Update Beneficiary</button>
         <button class="btn-sm red" id="ben-revoke-btn" onclick="doRevokeBeneficiary()" disabled>Revoke</button>
-        <button class="btn-sm green" onclick="doHeartbeat()">Heartbeat</button>
+        <button class="btn-sm green" onclick="loadBeneficiary(userAddress)" id="ben-refresh-btn">↻ Refresh</button>
       </div>
       <div class="status" id="ben-status"></div>
-      <div style="font-size:11px;color:var(--muted);margin-top:10px;border-top:1px solid var(--border);padding-top:10px">On-chain inheritance logic only — not a legal trust arrangement. Heartbeat records your last active timestamp on-chain.</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:10px;border-top:1px solid var(--border);padding-top:10px">On-chain inheritance logic only — not a legal trust arrangement.</div>
     </div>
   </div>
 
@@ -305,12 +313,15 @@ tr:last-child td{border-bottom:none}
 
     <div class="rp-sub">
       <div class="rp-sub-title">Deposit / Redeem</div>
-      <div class="btn-row">
-        <button class="btn-warn" onclick="doAdminVault('pauseDeposits','admin-pause-status')">Pause Deposits</button>
-        <button class="btn-teal" onclick="doAdminVault('unpauseDeposits','admin-pause-status')">Unpause Deposits</button>
-        <button class="btn-warn" onclick="doAdminVault('pauseRedeems','admin-pause-status')">Pause Redeems</button>
-        <button class="btn-teal" onclick="doAdminVault('unpauseRedeems','admin-pause-status')">Unpause Redeems</button>
+      <div style="display:flex;gap:20px;margin-bottom:10px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="admin-chk-deposits"> Pause Deposits
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="admin-chk-redeems"> Pause Redeems
+        </label>
       </div>
+      <button class="btn-teal" onclick="doApplyPauseSettings()">Apply</button>
       <div class="status" id="admin-pause-status"></div>
     </div>
 
@@ -450,7 +461,7 @@ const ROLE_ADMIN    = '0x087ea7F67d9282f0bdC43627b855F79789C6824C'
 const ROLE_GUARDIAN = '0xC8052cF447d429f63E890385a6924464B85c5834'
 const ROLE_TREASURY = '0x9d16Eb6A6143A3347f8fA5854B5AA675101Fb705'
 const USDC_ABI = ['function approve(address spender, uint256 amount) returns (bool)','function balanceOf(address account) view returns (uint256)','function allowance(address owner, address spender) view returns (uint256)']
-const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)','function nonces(address owner) view returns (uint256)','function accrueManagementFee()','function pauseDeposits()','function unpauseDeposits()','function pauseRedeems()','function unpauseRedeems()','function setMode(uint8 newMode)','function setMgmtFeeBpsPerMonth(uint256 newBps)','function setReserveRatioBps(uint256 newBps)','function addToAllowlist(address account)','function removeFromAllowlist(address account)','function mgmtFeeBpsPerMonth() view returns (uint256)','function reserveRatioBps() view returns (uint256)']
+const VAULT_ABI = ['function deposit(uint256 assets, address receiver) returns (uint256)','function redeem(uint256 shares, address receiver, address owner) returns (uint256)','function balanceOf(address account) view returns (uint256)','function totalAssets() view returns (uint256)','function pricePerShare() view returns (uint256)','function convertToAssets(uint256 shares) view returns (uint256)','function previewDeposit(uint256 assets) view returns (uint256)','function previewRedeem(uint256 shares) view returns (uint256)','function depositsPaused() view returns (bool)','function redeemsPaused() view returns (bool)','function systemMode() view returns (uint8)','function isAllowed(address account) view returns (bool)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)','function nonces(address owner) view returns (uint256)','function accrueManagementFee()','function pauseDeposits()','function unpauseDeposits()','function pauseRedeems()','function unpauseRedeems()','function setMode(uint8 newMode)','function setMgmtFeeBpsPerMonth(uint256 newBps)','function setReserveRatioBps(uint256 newBps)','function addToAllowlist(address account)','function removeFromAllowlist(address account)','function mgmtFeeBpsPerMonth() view returns (uint256)','function reserveRatioBps() view returns (uint256)','function transferToStrategyManager(uint256 amount)']
 const STRAT_MGR_ABI = ['function invest(uint256 amount)','function divest(uint256 amount) returns (uint256)','function returnToVault(uint256 amount)','function emergencyExit()','function totalManagedAssets() view returns (uint256)','function idleUnderlying() view returns (uint256)','function paused() view returns (bool)']
 const RWT_ABI = ['function balanceOf(address account) view returns (uint256)','function approve(address spender, uint256 amount) returns (bool)','function allowance(address owner, address spender) view returns (uint256)']
 const LEDGER_ABI = ['function getLock(uint256 lockId) view returns (tuple(address owner,uint256 shares,uint64 lockedAt,uint64 unlockAt,bool unlocked,bool earlyExited))','function userLockIds(address user) view returns (uint256[])','function activeLockCount(address user) view returns (uint256)','function unlock(uint256 lockId)']
@@ -523,7 +534,7 @@ async function connectWallet() {
   document.getElementById('wallet-role-badge').innerHTML  = userRole
     ? `<span class="role-badge ${userRole}">${userRole.toUpperCase()}</span>` : ''
   if (userRole === 'treasury') loadTreasuryData()
-  if (userRole === 'admin')    loadAdminStratInfo()
+  if (userRole === 'admin')    { loadAdminStratInfo(); loadAdminPauseState() }
   await loadProtocolData()
   await loadUserData(userAddress)
 }
@@ -535,7 +546,7 @@ async function switchNetwork() {
 }
 
 function disconnectWallet() {
-  userAddress = null; signer = null
+  userAddress = null; signer = null; freeShares = 0n; usdcBal = 0n; treasuryShares = 0n; selectedTier = null
   document.getElementById('connect-btn').style.display = 'block'
   document.getElementById('wallet-display').style.display = 'none'
   ;['position','positions','beneficiary'].forEach(k => {
@@ -545,8 +556,28 @@ function disconnectWallet() {
   document.getElementById('deposit-btn').disabled = true
   document.getElementById('redeem-btn').disabled = true
   document.getElementById('lock-btn').disabled = true
+  document.getElementById('lock-btn').textContent = 'Select Tier & Amount to Lock'
+  document.getElementById('deposit-amount').value = ''
+  document.getElementById('redeem-shares').value = ''
+  document.getElementById('lock-amount').value = ''
+  document.getElementById('lock-preview').classList.remove('show')
+  document.getElementById('lock-warn').textContent = ''
+  ;['bronze','silver','gold'].forEach(n => document.getElementById('tier-'+n).classList.remove('selected'))
   ;['admin-panel','guardian-panel','treasury-panel'].forEach(id => document.getElementById(id).style.display = 'none')
   document.getElementById('wallet-role-badge').innerHTML = ''
+  document.getElementById('not-allowlisted-banner').style.display = 'none'
+  document.getElementById('allowlist-info-banner').style.display = 'flex'
+  document.getElementById('deposit-panel').style.display = 'block'
+  document.getElementById('lock-section').style.display = 'block'
+  document.getElementById('beneficiary-section').style.display = 'block'
+}
+
+async function posRefresh() {
+  const btn = document.getElementById('pos-refresh-btn')
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Loading…' }
+  try { await loadUserData(userAddress) } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh' }
+  }
 }
 
 async function loadProtocolData() {
@@ -589,22 +620,23 @@ async function loadUserData(addr) {
     document.getElementById('lock-capacity').textContent    = 'Active locks: ' + lockCount.toString() + ' / 5'
     const m = Number(mode)
     document.getElementById('pos-pills').innerHTML = [
-      pill(allowed ? 'Allowlisted ✓' : 'Not Allowlisted', allowed ? 'ok' : 'err'),
-      ...(m!==0 ? [pill('Mode: '+MODE_LABELS[m], 'err')] : []),
-      ...(dep ? [pill('Deposits Paused', 'err')] : []),
-      ...(red ? [pill('Redeems Paused', 'err')] : []),
-    ].join ? [pill(allowed?'Allowlisted ✓':'Not Allowlisted', allowed?'ok':'err'),
-               ...(m!==0?[pill('Mode: '+MODE_LABELS[m],'err')]:[]),
-               ...(dep?[pill('Deposits Paused','err')]:[]),
-               ...(red?[pill('Redeems Paused','err')]:[])].join('') : ''
-    document.getElementById('pos-pills').innerHTML = [
       pill(allowed?'Allowlisted ✓':'Not Allowlisted', allowed?'ok':'err'),
       ...(m!==0?[pill('Mode: '+MODE_LABELS[m],'err')]:[]),
       ...(dep?[pill('Deposits Paused','err')]:[]),
       ...(red?[pill('Redeems Paused','err')]:[]),
     ].join('')
+    // Allowlisted UI gating
+    const isRole = userAddress.toLowerCase() === ROLE_ADMIN.toLowerCase() ||
+                   userAddress.toLowerCase() === ROLE_GUARDIAN.toLowerCase() ||
+                   userAddress.toLowerCase() === ROLE_TREASURY.toLowerCase()
+    document.getElementById('not-allowlisted-banner').style.display = (!allowed && !isRole) ? 'flex' : 'none'
+    document.getElementById('allowlist-info-banner').style.display  = allowed || isRole ? 'flex' : 'none'
+    // Deposit requires allowlist. Redeem is always available (exit protection).
+    document.getElementById('deposit-panel').style.display       = allowed || isRole ? 'block' : 'none'
+    document.getElementById('lock-section').style.display        = allowed || isRole ? 'block' : 'none'
+    document.getElementById('beneficiary-section').style.display = allowed || isRole ? 'block' : 'none'
     const dw = document.getElementById('deposit-warn')
-    dw.textContent = !allowed ? 'Your address is not on the deposit allowlist.' : dep ? 'Deposits are currently paused.' : m!==0 ? 'System is in '+MODE_LABELS[m]+' mode.' : ''
+    dw.textContent = dep ? 'Deposits are currently paused.' : m!==0 ? 'System is in '+MODE_LABELS[m]+' mode.' : ''
     document.getElementById('redeem-warn').textContent = red ? 'Redeems are currently paused.' : m===2 ? 'EmergencyExit mode — normal redeem is disabled.' : ''
     document.getElementById('deposit-btn').disabled = !allowed || dep || m!==0
     document.getElementById('redeem-btn').disabled  = red || m===2
@@ -844,6 +876,7 @@ async function loadBeneficiary(addr) {
 async function doSetBeneficiary() {
   const addr=document.getElementById('ben-input').value.trim()
   if (!ethers.isAddress(addr)) { setStatus('ben-status','Invalid address.','err'); return }
+  if (!confirm(`Set beneficiary to:\n${addr}\n\nPlease verify this address carefully. Setting a wrong address may result in permanent loss of access for your intended beneficiary.\n\nProceed?`)) return
   setStatus('ben-status','Submitting…','info')
   try {
     const cur=await ben.beneficiaryOf(userAddress)
@@ -945,6 +978,32 @@ async function doAccrueFee(statusId) {
   catch(e) { setStatus(statusId,shortError(e),'err') }
 }
 
+async function loadAdminPauseState() {
+  try {
+    const [dep, red] = await Promise.all([vault.depositsPaused(), vault.redeemsPaused()])
+    const depChk = document.getElementById('admin-chk-deposits')
+    const redChk = document.getElementById('admin-chk-redeems')
+    if (depChk) depChk.checked = dep
+    if (redChk) redChk.checked = red
+  } catch(e) { console.warn('loadAdminPauseState', e) }
+}
+async function doApplyPauseSettings() {
+  const wantDepPaused = document.getElementById('admin-chk-deposits').checked
+  const wantRedPaused = document.getElementById('admin-chk-redeems').checked
+  setStatus('admin-pause-status', 'Applying…', 'info')
+  try {
+    const [curDep, curRed] = await Promise.all([vault.depositsPaused(), vault.redeemsPaused()])
+    const txs = []
+    if (wantDepPaused !== curDep) txs.push(vault[wantDepPaused ? 'pauseDeposits' : 'unpauseDeposits']())
+    if (wantRedPaused !== curRed) txs.push(vault[wantRedPaused ? 'pauseRedeems' : 'unpauseRedeems']())
+    if (!txs.length) { setStatus('admin-pause-status', 'No changes to apply.', 'info'); return }
+    const results = await Promise.all(txs)
+    await Promise.all(results.map(t => t.wait()))
+    setStatus('admin-pause-status', '✓ Applied — ' + bsTx(results[results.length-1].hash), 'ok')
+    await loadProtocolData()
+  } catch(e) { setStatus('admin-pause-status', shortError(e), 'err') }
+}
+
 // ── Guardian functions ────────────────────────────────────────────────────────
 async function doGuardianPause(type) {
   setStatus('guardian-status','Submitting…','info')
@@ -1007,7 +1066,14 @@ window.addEventListener('load', async () => {
     window.ethereum.on('accountsChanged',a=>{ if(!a.length) disconnectWallet() })
     window.ethereum.on('chainChanged',()=>location.reload())
     const a=await window.ethereum.request({method:'eth_accounts'}).catch(()=>[])
-    if (a.length) connectWallet()
+    if (a.length) {
+      const chainId = await window.ethereum.request({method:'eth_chainId'}).catch(()=>null)
+      if (chainId && BigInt(chainId) !== BASE_CHAIN_ID) {
+        document.getElementById('net-alert').style.display = 'block'
+      } else {
+        connectWallet()
+      }
+    }
   }
 })
 </script>

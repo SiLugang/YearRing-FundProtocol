@@ -59,6 +59,15 @@ contract DummyStrategy is IStrategyV01 {
         }
     }
 
+    /// @notice Partially transfer `amount` of holdings back to caller
+    function partialEmergencyExit(uint256 amount) external override {
+        uint256 balance = _underlying.balanceOf(address(this));
+        uint256 toSend = amount > balance ? balance : amount;
+        if (toSend > 0) {
+            _underlying.safeTransfer(msg.sender, toSend);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Test helpers
     // -------------------------------------------------------------------------

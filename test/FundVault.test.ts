@@ -8,7 +8,6 @@ describe("FundVaultV01", function () {
   let vault: FundVaultV01;
   let usdc: MockUSDC;
   let admin: SignerWithAddress;
-  let guardian: SignerWithAddress;
   let treasury: SignerWithAddress;
   let alice: SignerWithAddress;
   let bob: SignerWithAddress;
@@ -17,19 +16,21 @@ describe("FundVaultV01", function () {
   const DEPOSIT = D6(1000);
 
   beforeEach(async function () {
-    [, admin, guardian, treasury, alice, bob] = await ethers.getSigners();
+    [, admin, treasury, alice, bob] = await ethers.getSigners();
 
     usdc = await (await ethers.getContractFactory("MockUSDC")).deploy();
     vault = await (await ethers.getContractFactory("FundVaultV01")).deploy(
       await usdc.getAddress(),
       "Fund Vault", "fvUSDC",
-      treasury.address, guardian.address, admin.address
+      treasury.address, admin.address
     );
 
     await usdc.mint(alice.address, DEPOSIT * 10n);
     await usdc.mint(bob.address, DEPOSIT * 10n);
     await usdc.connect(alice).approve(await vault.getAddress(), ethers.MaxUint256);
     await usdc.connect(bob).approve(await vault.getAddress(), ethers.MaxUint256);
+    await vault.connect(admin).addToAllowlist(alice.address);
+    await vault.connect(admin).addToAllowlist(bob.address);
   });
 
   // ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ describe("FundVaultV01", function () {
       );
     });
     it("reverts when depositsPaused", async function () {
-      await vault.connect(guardian).pauseDeposits();
+      await vault.connect(admin).pauseDeposits();
       await expect(
         vault.connect(alice).deposit(DEPOSIT, alice.address)
       ).to.be.revertedWithCustomError(vault, "DepositsArePaused");
@@ -112,7 +113,7 @@ describe("FundVaultV01", function () {
       );
     });
     it("reverts when redeemsPaused", async function () {
-      await vault.connect(guardian).pauseRedeems();
+      await vault.connect(admin).pauseRedeems();
       const shares = await vault.balanceOf(alice.address);
       await expect(
         vault.connect(alice).redeem(shares, alice.address, alice.address)
@@ -140,40 +141,40 @@ describe("FundVaultV01", function () {
   // Pause controls
   // ---------------------------------------------------------------------------
   describe("pause controls", function () {
-    it("GUARDIAN can pauseDeposits", async function () {
-      await vault.connect(guardian).pauseDeposits();
+    it("ADMIN can pauseDeposits", async function () {
+      await vault.connect(admin).pauseDeposits();
       expect(await vault.depositsPaused()).to.equal(true);
     });
     it("ADMIN can unpauseDeposits", async function () {
-      await vault.connect(guardian).pauseDeposits();
+      await vault.connect(admin).pauseDeposits();
       await vault.connect(admin).unpauseDeposits();
       expect(await vault.depositsPaused()).to.equal(false);
     });
-    it("GUARDIAN cannot unpauseDeposits", async function () {
-      await vault.connect(guardian).pauseDeposits();
+    it("non-ADMIN cannot unpauseDeposits", async function () {
+      await vault.connect(admin).pauseDeposits();
       await expect(
-        vault.connect(guardian).unpauseDeposits()
+        vault.connect(alice).unpauseDeposits()
       ).to.be.reverted;
     });
-    it("GUARDIAN can pauseRedeems", async function () {
-      await vault.connect(guardian).pauseRedeems();
+    it("ADMIN can pauseRedeems", async function () {
+      await vault.connect(admin).pauseRedeems();
       expect(await vault.redeemsPaused()).to.equal(true);
     });
     it("ADMIN can unpauseRedeems", async function () {
-      await vault.connect(guardian).pauseRedeems();
+      await vault.connect(admin).pauseRedeems();
       await vault.connect(admin).unpauseRedeems();
       expect(await vault.redeemsPaused()).to.equal(false);
     });
-    it("GUARDIAN cannot unpauseRedeems", async function () {
-      await vault.connect(guardian).pauseRedeems();
+    it("non-ADMIN cannot unpauseRedeems", async function () {
+      await vault.connect(admin).pauseRedeems();
       await expect(
-        vault.connect(guardian).unpauseRedeems()
+        vault.connect(alice).unpauseRedeems()
       ).to.be.reverted;
     });
-    it("non-GUARDIAN cannot pauseDeposits", async function () {
+    it("non-ADMIN cannot pauseDeposits", async function () {
       await expect(vault.connect(alice).pauseDeposits()).to.be.reverted;
     });
-    it("non-GUARDIAN cannot pauseRedeems", async function () {
+    it("non-ADMIN cannot pauseRedeems", async function () {
       await expect(vault.connect(alice).pauseRedeems()).to.be.reverted;
     });
   });
@@ -219,22 +220,23 @@ describe("FundVaultV01", function () {
     beforeEach(async function () {
       strategy = await (await ethers.getContractFactory("DummyStrategy")).deploy(await usdc.getAddress());
       manager = await (await ethers.getContractFactory("StrategyManagerV01")).deploy(
-        await usdc.getAddress(), await vault.getAddress(), admin.address, guardian.address
+        await usdc.getAddress(), await vault.getAddress(), admin.address
       );
-      await manager.connect(guardian).pause();
+      await manager.connect(admin).pause();
       await manager.connect(admin).setStrategy(await strategy.getAddress());
       await manager.connect(admin).unpause();
 
       await vault.connect(alice).deposit(DEPOSIT, alice.address);
       await vault.connect(admin).setModules(await manager.getAddress());
       await vault.connect(admin).setExternalTransfersEnabled(true);
-      await vault.connect(admin).setReserveRatioBps(0);
+      await vault.connect(admin).setReserveRatioBps(3000); // 30% reserve → 70% deployable
     });
 
-    it("transfers USDC to strategyManager", async function () {
+    it("transfers USDC to strategyManager (70% of deposit)", async function () {
+      const toTransfer = DEPOSIT * 70n / 100n; // max 70% per V3 MAX_STRATEGY_DEPLOY_BPS
       const before = await usdc.balanceOf(await manager.getAddress());
-      await vault.connect(admin).transferToStrategyManager(DEPOSIT);
-      expect(await usdc.balanceOf(await manager.getAddress())).to.equal(before + DEPOSIT);
+      await vault.connect(admin).transferToStrategyManager(toTransfer);
+      expect(await usdc.balanceOf(await manager.getAddress())).to.equal(before + toTransfer);
     });
     it("reverts when ExternalTransfersDisabled", async function () {
       await vault.connect(admin).setExternalTransfersEnabled(false);
@@ -243,17 +245,20 @@ describe("FundVaultV01", function () {
       ).to.be.revertedWithCustomError(vault, "ExternalTransfersDisabled");
     });
     it("reverts when amount exceeds availableToInvest (ReserveTooLow)", async function () {
-      await vault.connect(admin).setReserveRatioBps(5000); // 50% reserve
+      await vault.connect(admin).setReserveRatioBps(5000); // 50% reserve → only 500 available
+      // Try to transfer 600: < 70% (ok for MaxDeploy) but > 500 available → ReserveTooLow
+      const amount600 = ethers.parseUnits("600", 6);
       await expect(
-        vault.connect(admin).transferToStrategyManager(DEPOSIT) // > 500 USDC available
+        vault.connect(admin).transferToStrategyManager(amount600)
       ).to.be.revertedWithCustomError(vault, "ReserveTooLow");
     });
     it("reverts when strategyManager is zero address", async function () {
       // Deploy fresh vault with no strategyManager set
       const vault2 = await (await ethers.getContractFactory("FundVaultV01")).deploy(
-        await usdc.getAddress(), "V2", "V2", treasury.address, guardian.address, admin.address
+        await usdc.getAddress(), "V2", "V2", treasury.address, admin.address
       );
       await usdc.connect(alice).approve(await vault2.getAddress(), ethers.MaxUint256);
+      await vault2.connect(admin).addToAllowlist(alice.address);
       await vault2.connect(alice).deposit(DEPOSIT, alice.address);
       await vault2.connect(admin).setExternalTransfersEnabled(true);
       await vault2.connect(admin).setReserveRatioBps(0);
@@ -312,6 +317,21 @@ describe("FundVaultV01", function () {
       await expect(
         vault.connect(alice).setMgmtFeeBpsPerMonth(10)
       ).to.be.reverted;
+    });
+    it("fee accrual dilutes PPS: existing holders' redemption value decreases", async function () {
+      // Alice deposits 1000 USDC; initial PPS = 1 USDC
+      await vault.connect(alice).deposit(DEPOSIT, alice.address);
+      const ppsBefore = await vault.pricePerShare();
+
+      // Set fee to 1%/month and advance 30 days
+      await vault.connect(admin).setMgmtFeeBpsPerMonth(100);
+      await time.increase(30 * 24 * 60 * 60);
+
+      // Trigger fee accrual: new shares minted to treasury, totalAssets unchanged
+      await vault.accrueManagementFee();
+
+      // PPS must be strictly lower than before: same USDC, more shares outstanding
+      expect(await vault.pricePerShare()).to.be.lt(ppsBefore);
     });
   });
 

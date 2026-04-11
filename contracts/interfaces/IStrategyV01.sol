@@ -24,4 +24,7 @@ interface IStrategyV01 {
 
     /// @notice Trigger emergency withdrawal — pull as much as possible back to StrategyManagerV01
     function emergencyExit() external;
+
+    /// @notice Partially withdraw `amount` of underlying back to StrategyManagerV01
+    function partialEmergencyExit(uint256 amount) external;
 }

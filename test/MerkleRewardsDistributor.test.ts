@@ -47,7 +47,7 @@ describe("MerkleRewardsDistributorV01", function () {
     usdc = await (await ethers.getContractFactory("MockUSDC")).deploy();
     vault = await (await ethers.getContractFactory("FundVaultV01")).deploy(
       await usdc.getAddress(), "Fund Vault", "fvUSDC",
-      treasury.address, guardian.address, admin.address
+      treasury.address, admin.address
     );
     rewardToken = await (await ethers.getContractFactory("RewardToken")).deploy(
       "Reward Token", "RWD", PREMINT, treasury.address
